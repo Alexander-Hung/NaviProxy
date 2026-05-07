@@ -1,0 +1,21 @@
+{
+  "name": "naviproxy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A lightweight dashboard and reverse proxy gateway for homelabs.",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @naviproxy/api\" \"npm run dev -w @naviproxy/web\"",
+    "build": "npm run build -w @naviproxy/api && npm run build -w @naviproxy/web",
+    "lint": "npm run lint -w @naviproxy/api && npm run lint -w @naviproxy/web",
+    "start": "npm run start -w @naviproxy/api",
+    "typecheck": "npm run typecheck -w @naviproxy/api && npm run typecheck -w @naviproxy/web"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "^7.16.0",
+    "@typescript-eslint/parser": "^7.16.0",
+    "concurrently": "^8.2.2"
+  }
+}

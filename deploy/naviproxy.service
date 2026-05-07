@@ -1,0 +1,17 @@
+[Unit]
+Description=NaviProxy dashboard and reverse proxy controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/naviproxy
+EnvironmentFile=/etc/naviproxy/naviproxy.env
+ExecStart=/usr/bin/npm start
+Restart=on-failure
+RestartSec=5
+User=naviproxy
+Group=naviproxy
+
+[Install]
+WantedBy=multi-user.target

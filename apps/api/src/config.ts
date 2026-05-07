@@ -1,0 +1,15 @@
+import path from 'node:path';
+
+export const config = {
+  host: process.env.HOST ?? '0.0.0.0',
+  port: Number(process.env.PORT ?? 3001),
+  databasePath:
+    process.env.DATABASE_PATH ??
+    path.resolve(process.cwd(), '../../data/naviproxy.sqlite'),
+  webDistPath:
+    process.env.WEB_DIST_PATH ??
+    path.resolve(process.cwd(), '../web/dist'),
+  caddyAdminUrl: process.env.CADDY_ADMIN_URL ?? 'http://127.0.0.1:2019',
+  caddySyncEnabled: process.env.CADDY_SYNC_ENABLED === 'true',
+  caddyListen: process.env.CADDY_LISTEN ?? ':80'
+};

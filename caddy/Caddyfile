@@ -1,0 +1,7 @@
+{
+	admin {$CADDY_ADMIN_BIND:127.0.0.1}:2019
+}
+
+:80 {
+	respond "NaviProxy Caddy is ready. Dynamic routes are loaded through the Admin API."
+}
