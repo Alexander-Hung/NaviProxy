@@ -18,7 +18,7 @@ sudo apt install -y nodejs
 ```bash
 sudo mkdir -p /opt/naviproxy
 sudo chown "$USER":"$USER" /opt/naviproxy
-git clone <YOUR_REPO_URL> /opt/naviproxy
+git clone https://github.com/Alexander-Hung/NaviProxy /opt/naviproxy
 cd /opt/naviproxy
 npm ci
 npm run build
