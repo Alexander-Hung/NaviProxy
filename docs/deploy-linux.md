@@ -2,6 +2,21 @@
 
 This guide assumes Debian or Ubuntu. Adjust package commands for other distributions.
 
+## Fast Path
+
+```bash
+git clone <YOUR_REPO_URL> /opt/naviproxy
+cd /opt/naviproxy
+./install.sh
+./start.sh
+```
+
+`install.sh` installs system packages on Debian/Ubuntu, installs Node.js 22 when needed, installs Caddy when missing, runs `npm ci`, builds the app, prepares `/etc/naviproxy/naviproxy.env`, and reloads Caddy.
+
+`start.sh` loads `/etc/naviproxy/naviproxy.env`, verifies build output, starts Caddy if systemd is available, and starts NaviProxy.
+
+## Manual Install
+
 ## 1. Install runtime dependencies
 
 ```bash

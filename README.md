@@ -23,7 +23,14 @@ The API runs at `http://localhost:3001`.
 
 See [docs/deploy-linux.md](docs/deploy-linux.md) for the mini PC deployment path using Node.js, SQLite, Caddy, and systemd.
 
-Production build:
+One-click install and start after cloning the repo:
+
+```bash
+./install.sh
+./start.sh
+```
+
+Manual production build:
 
 ```bash
 npm ci
