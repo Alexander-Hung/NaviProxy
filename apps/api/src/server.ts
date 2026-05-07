@@ -20,6 +20,25 @@ const appsRepo = new AppsRepo(db);
 const proxyService = new ProxyService(db, appsRepo);
 const appsService = new AppsService(db, proxyService);
 
+app.addContentTypeParser(
+  'application/json',
+  { parseAs: 'string' },
+  (_request, body, done) => {
+    const raw = typeof body === 'string' ? body.trim() : '';
+
+    if (!raw) {
+      done(null, undefined);
+      return;
+    }
+
+    try {
+      done(null, JSON.parse(raw));
+    } catch (error) {
+      done(error as Error, undefined);
+    }
+  }
+);
+
 await app.register(cors, {
   origin: true
 });
