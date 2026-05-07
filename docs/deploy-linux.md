@@ -5,7 +5,7 @@ This guide assumes Debian or Ubuntu. Adjust package commands for other distribut
 ## Fast Path
 
 ```bash
-git clone <YOUR_REPO_URL> /opt/naviproxy
+git clone https://github.com/Alexander-Hung/NaviProxy /opt/naviproxy
 cd /opt/naviproxy
 ./install.sh
 ./start.sh
