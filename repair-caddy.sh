@@ -3,6 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="${NAVIPROXY_ENV_FILE:-/etc/naviproxy/naviproxy.env}"
+SERVICE_USER="${NAVIPROXY_SERVICE_USER:-naviproxy}"
+SERVICE_GROUP="${NAVIPROXY_SERVICE_GROUP:-naviproxy}"
 
 log() {
   printf '\n[naviproxy] %s\n' "$1"
@@ -41,6 +43,34 @@ install_caddyfile() {
   log "Installing Caddyfile to /etc/caddy/Caddyfile..."
   run_root mkdir -p /etc/caddy
   run_root cp "$ROOT_DIR/caddy/Caddyfile" /etc/caddy/Caddyfile
+}
+
+ensure_build() {
+  log "Installing dependencies and building NaviProxy..."
+  cd "$ROOT_DIR"
+  npm ci
+  npm run build
+}
+
+ensure_service() {
+  if ! need_cmd systemctl; then
+    return
+  fi
+
+  log "Ensuring NaviProxy systemd service is configured..."
+  "$ROOT_DIR/enable-autostart.sh" >/dev/null
+}
+
+fix_permissions() {
+  local data_path="${DATABASE_PATH:-$ROOT_DIR/data/naviproxy.sqlite}"
+  local data_dir
+  data_dir="$(dirname "$data_path")"
+
+  run_root mkdir -p "$data_dir"
+
+  if getent group "$SERVICE_GROUP" >/dev/null 2>&1 && id "$SERVICE_USER" >/dev/null 2>&1; then
+    run_root chown -R "$SERVICE_USER:$SERVICE_GROUP" "$data_dir"
+  fi
 }
 
 restart_caddy() {
@@ -83,9 +113,12 @@ sync_proxy() {
 
 main() {
   load_env
+  ensure_build
   install_caddyfile
-  restart_caddy
+  fix_permissions
+  ensure_service
   restart_naviproxy
+  restart_caddy
   sync_proxy
 
   log "Caddy repair complete. Open http://<MINI_PC_IP>"

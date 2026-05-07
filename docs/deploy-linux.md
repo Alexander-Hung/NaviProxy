@@ -97,6 +97,13 @@ If port 80 still shows an old Caddy placeholder page, run:
 ./repair-caddy.sh
 ```
 
+If Caddy returns `502`, run:
+
+```bash
+./repair-caddy.sh
+./doctor.sh
+```
+
 ## 5. Run as a systemd service
 
 ```bash

@@ -42,6 +42,12 @@ Repair Caddy port 80 routing if Caddy still shows an old placeholder page:
 ./repair-caddy.sh
 ```
 
+Diagnose port 80 / 502 issues:
+
+```bash
+./doctor.sh
+```
+
 Manual production build:
 
 ```bash

@@ -78,7 +78,7 @@ EOF
 
 prepare_permissions() {
   log "Preparing service permissions..."
-  chmod +x "$ROOT_DIR/install.sh" "$ROOT_DIR/start.sh" "$ROOT_DIR/enable-autostart.sh"
+  chmod +x "$ROOT_DIR/install.sh" "$ROOT_DIR/start.sh" "$ROOT_DIR/enable-autostart.sh" "$ROOT_DIR/repair-caddy.sh" "$ROOT_DIR/doctor.sh"
 
   set -a
   # shellcheck disable=SC1090
