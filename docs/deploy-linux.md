@@ -66,6 +66,7 @@ WEB_DIST_PATH=/opt/naviproxy/apps/web/dist
 CADDY_ADMIN_URL=http://127.0.0.1:2019
 CADDY_SYNC_ENABLED=true
 CADDY_LISTEN=:80
+NAVIPROXY_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
 ```
 
 ## 4. Enable Caddy Admin API
@@ -74,11 +75,13 @@ Create or update `/etc/caddy/Caddyfile`:
 
 ```caddyfile
 {
-	admin 127.0.0.1:2019
+	admin 127.0.0.1:2019 {
+		origins localhost:2019 127.0.0.1:2019 [::1]:2019
+	}
 }
 
 :80 {
-	respond "NaviProxy Caddy is ready."
+	reverse_proxy 127.0.0.1:3001
 }
 ```
 
@@ -86,6 +89,12 @@ Then reload Caddy:
 
 ```bash
 sudo systemctl reload caddy
+```
+
+If port 80 still shows an old Caddy placeholder page, run:
+
+```bash
+./repair-caddy.sh
 ```
 
 ## 5. Run as a systemd service

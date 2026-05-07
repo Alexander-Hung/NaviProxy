@@ -36,6 +36,12 @@ Enable boot autostart:
 ./enable-autostart.sh
 ```
 
+Repair Caddy port 80 routing if Caddy still shows an old placeholder page:
+
+```bash
+./repair-caddy.sh
+```
+
 Manual production build:
 
 ```bash
