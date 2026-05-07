@@ -127,6 +127,30 @@ Caddy listens on port `80` and forwards NaviProxy dashboard traffic to the Node 
 
 After adding a subdomain app such as `jellyfin.lab.home`, point that name to the mini PC IP in your router DNS, Pi-hole, AdGuard Home, or local DNS server.
 
+Subdomains are written app-first. For Homebridge, use:
+
+```txt
+homebridge.lab.home
+```
+
+Do not use:
+
+```txt
+lab.home.homebridge
+```
+
+If your local DNS only has `lab.home -> <MINI_PC_IP>`, that only covers the dashboard host. Add either:
+
+```txt
+homebridge.lab.home -> <MINI_PC_IP>
+```
+
+or a wildcard record:
+
+```txt
+*.lab.home -> <MINI_PC_IP>
+```
+
 ## Notes
 
 - Subdomain mode is recommended.

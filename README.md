@@ -69,6 +69,8 @@ CADDY_SYNC_ENABLED=true CADDY_ADMIN_URL=http://127.0.0.1:2019 npm run dev -w @na
 
 - Add apps from the admin panel.
 - Subdomain mode is the recommended path, for example `jellyfin.lab.home`.
+- Subdomains are app-first: use `homebridge.lab.home`, not `lab.home.homebridge`.
+- Local DNS must resolve each app host to the NaviProxy machine, either with records like `homebridge.lab.home -> <MINI_PC_IP>` or a wildcard record like `*.lab.home -> <MINI_PC_IP>`.
 - Subpath mode is available, but the UI warns that it may break static assets, redirects, cookies, WebSockets, or OAuth callbacks.
 - Enabled apps are written to SQLite.
 - When Caddy sync is enabled, NaviProxy renders a Caddy JSON config and posts it to `/load`.

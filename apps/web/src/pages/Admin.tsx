@@ -213,6 +213,12 @@ export function Admin({ onBack }: Props) {
                 placeholder="jellyfin.lab.home"
                 required
               />
+              {form.routeMode === 'subdomain' ? (
+                <p className="mt-2 text-xs leading-5 text-black/50 dark:text-white/50">
+                  Use app-first names like homebridge.lab.home, and point either
+                  that host or *.lab.home to the NaviProxy machine in local DNS.
+                </p>
+              ) : null}
             </div>
 
             {form.routeMode === 'subpath' ? (
