@@ -128,6 +128,7 @@ main() {
 
   log "Install complete."
   log "Start with: ./start.sh"
+  log "Enable autostart with: ./enable-autostart.sh"
 }
 
 main "$@"

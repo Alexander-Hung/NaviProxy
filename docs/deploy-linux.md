@@ -15,6 +15,14 @@ cd /opt/naviproxy
 
 `start.sh` loads `/etc/naviproxy/naviproxy.env`, verifies build output, starts Caddy if systemd is available, and starts NaviProxy.
 
+Enable boot autostart:
+
+```bash
+./enable-autostart.sh
+```
+
+That writes `/etc/systemd/system/naviproxy.service`, creates the `naviproxy` system user when needed, enables the service, and starts it immediately.
+
 ## Manual Install
 
 ## 1. Install runtime dependencies
@@ -83,10 +91,7 @@ sudo systemctl reload caddy
 ## 5. Run as a systemd service
 
 ```bash
-sudo cp deploy/naviproxy.service /etc/systemd/system/naviproxy.service
-sudo chown -R naviproxy:naviproxy /opt/naviproxy
-sudo systemctl daemon-reload
-sudo systemctl enable --now naviproxy
+./enable-autostart.sh
 ```
 
 Check status:

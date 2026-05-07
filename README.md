@@ -30,6 +30,12 @@ One-click install and start after cloning the repo:
 ./start.sh
 ```
 
+Enable boot autostart:
+
+```bash
+./enable-autostart.sh
+```
+
 Manual production build:
 
 ```bash
