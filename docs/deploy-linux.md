@@ -104,8 +104,10 @@ curl http://127.0.0.1:3001/api/health
 Open:
 
 ```txt
-http://<MINI_PC_IP>:3001
+http://<MINI_PC_IP>
 ```
+
+Caddy listens on port `80` and forwards NaviProxy dashboard traffic to the Node service on `3001`, so you do not need to type a port in the browser.
 
 After adding a subdomain app such as `jellyfin.lab.home`, point that name to the mini PC IP in your router DNS, Pi-hole, AdGuard Home, or local DNS server.
 

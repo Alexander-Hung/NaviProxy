@@ -5,5 +5,5 @@
 }
 
 :80 {
-	respond "NaviProxy Caddy is ready. Dynamic routes are loaded through the Admin API."
+	reverse_proxy 127.0.0.1:3001
 }

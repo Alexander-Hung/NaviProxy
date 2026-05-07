@@ -45,6 +45,7 @@ npm start
 ```
 
 The production API serves both `/api/*` and the built web dashboard.
+With Caddy enabled, open NaviProxy at `http://<MINI_PC_IP>` without a port. Caddy listens on port `80` and forwards dashboard traffic to the API service on `3001`.
 
 By default, Caddy sync is disabled for local development. To enable live Caddy updates:
 

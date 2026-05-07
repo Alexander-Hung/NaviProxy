@@ -89,6 +89,7 @@ WEB_DIST_PATH=$ROOT_DIR/apps/web/dist
 CADDY_ADMIN_URL=http://127.0.0.1:2019
 CADDY_SYNC_ENABLED=true
 CADDY_LISTEN=:80
+NAVIPROXY_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
 EOF
     run_root mv "$ROOT_DIR/.naviproxy.env.tmp" "$ENV_FILE"
   fi

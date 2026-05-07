@@ -7,12 +7,12 @@ function upstreamDial(targetUrl: string) {
   return `${url.hostname}:${url.port || (url.protocol === 'https:' ? '443' : '80')}`;
 }
 
-function reverseProxyHandle(app: AppRecord) {
-  const url = new URL(app.targetUrl);
+function reverseProxyTarget(targetUrl: string) {
+  const url = new URL(targetUrl);
 
   return {
     handler: 'reverse_proxy',
-    upstreams: [{ dial: upstreamDial(app.targetUrl) }],
+    upstreams: [{ dial: upstreamDial(targetUrl) }],
     ...(url.protocol === 'https:'
       ? {
           transport: {
@@ -22,6 +22,10 @@ function reverseProxyHandle(app: AppRecord) {
         }
       : {})
   };
+}
+
+function reverseProxyHandle(app: AppRecord) {
+  return reverseProxyTarget(app.targetUrl);
 }
 
 function buildSubdomainRoute(app: AppRecord): CaddyRoute {
@@ -62,12 +66,24 @@ function buildSubpathRoute(app: AppRecord): CaddyRoute {
   };
 }
 
-export function buildCaddyConfig(apps: AppRecord[], listen: string) {
+function buildDashboardRoute(dashboardTargetUrl: string): CaddyRoute {
+  return {
+    handle: [reverseProxyTarget(dashboardTargetUrl)]
+  };
+}
+
+export function buildCaddyConfig(
+  apps: AppRecord[],
+  listen: string,
+  dashboardTargetUrl: string
+) {
   const routes = apps.map((app) =>
     app.routeMode === 'subdomain'
       ? buildSubdomainRoute(app)
       : buildSubpathRoute(app)
   );
+
+  routes.push(buildDashboardRoute(dashboardTargetUrl));
 
   return {
     apps: {

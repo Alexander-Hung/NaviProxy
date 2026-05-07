@@ -11,5 +11,8 @@ export const config = {
     path.resolve(process.cwd(), '../web/dist'),
   caddyAdminUrl: process.env.CADDY_ADMIN_URL ?? 'http://127.0.0.1:2019',
   caddySyncEnabled: process.env.CADDY_SYNC_ENABLED === 'true',
-  caddyListen: process.env.CADDY_LISTEN ?? ':80'
+  caddyListen: process.env.CADDY_LISTEN ?? ':80',
+  dashboardTargetUrl:
+    process.env.NAVIPROXY_DASHBOARD_TARGET_URL ??
+    `http://127.0.0.1:${Number(process.env.PORT ?? 3001)}`
 };

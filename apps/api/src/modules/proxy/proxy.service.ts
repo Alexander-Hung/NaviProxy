@@ -16,7 +16,11 @@ export class ProxyService {
 
   async sync() {
     const apps = this.appsRepo.findEnabled();
-    const caddyConfig = buildCaddyConfig(apps, config.caddyListen);
+    const caddyConfig = buildCaddyConfig(
+      apps,
+      config.caddyListen,
+      config.dashboardTargetUrl
+    );
     const hash = crypto
       .createHash('sha256')
       .update(JSON.stringify(caddyConfig))
@@ -39,7 +43,11 @@ export class ProxyService {
   }
 
   getRenderedConfig() {
-    return buildCaddyConfig(this.appsRepo.findEnabled(), config.caddyListen);
+    return buildCaddyConfig(
+      this.appsRepo.findEnabled(),
+      config.caddyListen,
+      config.dashboardTargetUrl
+    );
   }
 
   private recordVersion(

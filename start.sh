@@ -51,7 +51,13 @@ main() {
   start_caddy_if_available
 
   log "Starting NaviProxy..."
-  log "Open: http://$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost):${PORT:-3001}"
+  HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost)"
+  if [ "${CADDY_LISTEN:-:80}" = ":80" ]; then
+    log "Open: http://$HOST_IP"
+    log "Direct API fallback: http://$HOST_IP:${PORT:-3001}"
+  else
+    log "Open: http://$HOST_IP:${PORT:-3001}"
+  fi
   cd "$ROOT_DIR"
   npm start
 }
