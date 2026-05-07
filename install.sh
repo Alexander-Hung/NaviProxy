@@ -50,7 +50,14 @@ install_debian_packages() {
 
   if ! need_cmd caddy; then
     log "Installing Caddy..."
-    run_root apt-get install -y caddy
+    if ! run_root apt-get install -y caddy; then
+      log "Caddy was not found in the default apt sources. Adding the official Caddy repository..."
+      run_root apt-get install -y debian-keyring debian-archive-keyring apt-transport-https gnupg
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | run_root gpg --dearmor --yes -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+      curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | run_root tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+      run_root apt-get update
+      run_root apt-get install -y caddy
+    fi
   fi
 }
 

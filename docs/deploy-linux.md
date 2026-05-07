@@ -11,7 +11,7 @@ cd /opt/naviproxy
 ./start.sh
 ```
 
-`install.sh` installs system packages on Debian/Ubuntu, installs Node.js 22 when needed, installs Caddy when missing, runs `npm ci`, builds the app, prepares `/etc/naviproxy/naviproxy.env`, and reloads Caddy.
+`install.sh` installs system packages on Debian/Ubuntu, installs Node.js 22 when needed, installs Caddy when missing, runs `npm ci`, builds the app, prepares `/etc/naviproxy/naviproxy.env`, and reloads Caddy. If `apt` cannot locate `caddy`, the script adds Caddy's official apt repository and retries.
 
 `start.sh` loads `/etc/naviproxy/naviproxy.env`, verifies build output, starts Caddy if systemd is available, and starts NaviProxy.
 
