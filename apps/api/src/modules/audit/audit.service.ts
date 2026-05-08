@@ -9,24 +9,30 @@ export type AuditInput = {
   sourceIp?: string | null;
 };
 
+const auditRetention = 1000;
+
 export class AuditService {
   constructor(private readonly db: NaviDatabase) {}
 
   record(input: AuditInput) {
-    this.db
-      .prepare(
-        `INSERT INTO audit_logs (
-          id, action, target_type, target_id, summary, source_ip
-        ) VALUES (
-          @id, @action, @targetType, @targetId, @summary, @sourceIp
-        )`
-      )
-      .run({
-        id: nanoid(),
-        targetId: null,
-        sourceIp: null,
-        ...input
-      });
+    this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO audit_logs (
+            id, action, target_type, target_id, summary, source_ip
+          ) VALUES (
+            @id, @action, @targetType, @targetId, @summary, @sourceIp
+          )`
+        )
+        .run({
+          id: nanoid(),
+          targetId: null,
+          sourceIp: null,
+          ...input
+        });
+
+      this.pruneInCurrentTransaction();
+    })();
   }
 
   list(limit = 50) {
@@ -49,5 +55,18 @@ export class AuditService {
         LIMIT ?`
       )
       .all(normalizedLimit);
+  }
+
+  private pruneInCurrentTransaction() {
+    this.db
+      .prepare(
+        `DELETE FROM audit_logs
+        WHERE id IN (
+          SELECT id FROM audit_logs
+          ORDER BY created_at DESC
+          LIMIT -1 OFFSET ?
+        )`
+      )
+      .run(auditRetention);
   }
 }

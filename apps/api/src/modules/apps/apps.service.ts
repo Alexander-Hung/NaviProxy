@@ -2,10 +2,13 @@ import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import type { NaviDatabase } from '../../db/database.js';
 import type { ProxyService } from '../proxy/proxy.service.js';
+import type { SettingsService } from '../settings/settings.service.js';
 import { AppsRepo } from './apps.repo.js';
 import type { AppRecord, AppStatus } from './apps.types.js';
 
 export class AppConflictError extends Error {}
+
+const backupSnapshotRetention = 25;
 
 const hostnameLabel = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
 
@@ -404,6 +407,10 @@ export class AppsService {
     return this.repo.findHealthHistory(appId, limit);
   }
 
+  latestStatuses() {
+    return this.repo.findLatestHealthStatuses();
+  }
+
   exportApps() {
     return {
       exportedAt: new Date().toISOString(),
@@ -411,7 +418,7 @@ export class AppsService {
     };
   }
 
-  async importApps(input: unknown) {
+  private prepareImportedApps(input: unknown) {
     const parsed = importSchema.parse(input);
     const now = new Date().toISOString();
     const apps = parsed.apps.map((appInput, index) => {
@@ -438,19 +445,83 @@ export class AppsService {
     });
 
     this.ensureImportedAppsAreUnique(apps);
+    return apps;
+  }
+
+  async importApps(input: unknown) {
+    const apps = this.prepareImportedApps(input);
     const savedApps = this.repo.replaceAll(apps);
     const proxySync = await this.proxyService.syncSafely();
 
     return { apps: savedApps, proxySync };
   }
 
+  async restoreBackup(input: {
+    apps: unknown[];
+    settings?: unknown;
+    settingsService: SettingsService;
+    adminTokenConfigured: boolean;
+  }) {
+    const apps = this.prepareImportedApps({
+      mode: 'replace',
+      apps: input.apps
+    });
+    const nextSettings = input.settings
+      ? input.settingsService.normalize(input.settings, {
+          adminTokenConfigured: input.adminTokenConfigured
+        })
+      : input.settingsService.getAll();
+    const snapshot = {
+      exportedAt: new Date().toISOString(),
+      version: 1,
+      apps: this.exportApps().apps,
+      settings: input.settingsService.getAll()
+    };
+
+    const savedApps = this.db.transaction(() => {
+      this.recordBackupSnapshotInCurrentTransaction('pre_restore', snapshot);
+      const restoredApps = this.repo.replaceAllInCurrentTransaction(apps);
+      input.settingsService.save(nextSettings);
+      this.pruneBackupSnapshotsInCurrentTransaction();
+      return restoredApps;
+    })();
+    const proxySync = await this.proxyService.syncSafely();
+
+    return {
+      apps: savedApps,
+      settings: nextSettings,
+      snapshot,
+      proxySync
+    };
+  }
+
   recordBackupSnapshot(reason: string, payload: unknown) {
+    this.db.transaction(() => {
+      this.recordBackupSnapshotInCurrentTransaction(reason, payload);
+      this.pruneBackupSnapshotsInCurrentTransaction();
+    })();
+  }
+
+  private recordBackupSnapshotInCurrentTransaction(reason: string, payload: unknown) {
     this.db
       .prepare(
         `INSERT INTO backup_snapshots (id, reason, payload)
         VALUES (?, ?, ?)`
       )
       .run(nanoid(), reason, JSON.stringify(payload));
+  }
+
+  private pruneBackupSnapshotsInCurrentTransaction() {
+    this.db
+      .prepare(
+        `DELETE FROM backup_snapshots
+        WHERE id IN (
+          SELECT id FROM backup_snapshots
+          ORDER BY created_at DESC
+          LIMIT -1 OFFSET ?
+        )`
+      )
+      .run(backupSnapshotRetention);
   }
 
   listBackupSnapshots(limit = 20) {

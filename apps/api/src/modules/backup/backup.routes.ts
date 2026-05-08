@@ -29,30 +29,12 @@ export async function registerBackupRoutes(
     }
 
     try {
-      const snapshot = {
-        exportedAt: new Date().toISOString(),
-        version: 1,
-        apps: appsService.exportApps().apps,
-        settings: settingsService.getAll()
-      };
-
-      auditService.record({
-        action: 'backup.snapshot',
-        targetType: 'backup',
-        summary: 'Created automatic pre-restore snapshot',
-        sourceIp: request.ip
+      const result = await appsService.restoreBackup({
+        apps: body.apps,
+        settings: body.settings,
+        settingsService,
+        adminTokenConfigured: Boolean(config.adminToken)
       });
-      appsService.recordBackupSnapshot('pre_restore', snapshot);
-
-      const appsResult = await appsService.importApps({
-        mode: 'replace',
-        apps: body.apps
-      });
-      const settings = body.settings
-        ? settingsService.update(body.settings, {
-            adminTokenConfigured: Boolean(config.adminToken)
-          })
-        : settingsService.getAll();
       auditService.record({
         action: 'backup.restore',
         targetType: 'backup',
@@ -60,11 +42,7 @@ export async function registerBackupRoutes(
         sourceIp: request.ip
       });
 
-      return {
-        ...appsResult,
-        settings,
-        snapshot
-      };
+      return result;
     } catch (error) {
       if (error instanceof ZodError) {
         return reply.code(400).send({

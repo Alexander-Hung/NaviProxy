@@ -139,7 +139,7 @@ export class AppsRepo {
     return this.findById(id);
   }
 
-  replaceAll(apps: AppRecord[]) {
+  replaceAllInCurrentTransaction(apps: AppRecord[]) {
     const insert = this.db.prepare(
       `INSERT INTO apps (
         id, name, slug, icon_type, icon_value, target_url, route_mode,
@@ -152,20 +152,22 @@ export class AppsRepo {
       )`
     );
 
-    this.db.transaction(() => {
-      this.db.prepare('DELETE FROM apps').run();
+    this.db.prepare('DELETE FROM apps').run();
 
-      for (const app of apps) {
-        insert.run({
-          ...app,
-          enabled: app.enabled ? 1 : 0,
-          tags: JSON.stringify(app.tags),
-          favorite: app.favorite ? 1 : 0
-        });
-      }
-    })();
+    for (const app of apps) {
+      insert.run({
+        ...app,
+        enabled: app.enabled ? 1 : 0,
+        tags: JSON.stringify(app.tags),
+        favorite: app.favorite ? 1 : 0
+      });
+    }
 
     return this.findAll();
+  }
+
+  replaceAll(apps: AppRecord[]) {
+    return this.db.transaction(() => this.replaceAllInCurrentTransaction(apps))();
   }
 
   recordHealthChecks(statuses: AppStatus[]) {
@@ -207,6 +209,10 @@ export class AppsRepo {
   }
 
   findHealthHistory(appId: string, limit = 30) {
+    const normalizedLimit = Number.isFinite(limit)
+      ? Math.min(Math.max(limit, 1), 100)
+      : 30;
+
     return this.db
       .prepare(
         `SELECT
@@ -221,7 +227,34 @@ export class AppsRepo {
         ORDER BY checked_at DESC
         LIMIT ?`
       )
-      .all(appId, Math.min(Math.max(limit, 1), 100))
+      .all(appId, normalizedLimit)
+      .map((row) => ({
+        ...(row as Omit<AppStatus, 'ok'> & { ok: number }),
+        ok: (row as { ok: number }).ok === 1
+      }));
+  }
+
+  findLatestHealthStatuses() {
+    return this.db
+      .prepare(
+        `SELECT
+          latest.app_id AS id,
+          latest.ok,
+          latest.status_code AS statusCode,
+          latest.response_time_ms AS responseTimeMs,
+          latest.checked_at AS checkedAt,
+          latest.error
+        FROM app_health_checks latest
+        INNER JOIN (
+          SELECT app_id, MAX(checked_at) AS checked_at
+          FROM app_health_checks
+          GROUP BY app_id
+        ) grouped
+          ON grouped.app_id = latest.app_id
+          AND grouped.checked_at = latest.checked_at
+        ORDER BY latest.checked_at DESC`
+      )
+      .all()
       .map((row) => ({
         ...(row as Omit<AppStatus, 'ok'> & { ok: number }),
         ok: (row as { ok: number }).ok === 1

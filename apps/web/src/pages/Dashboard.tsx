@@ -15,14 +15,16 @@ export function Dashboard({ onOpenAdmin }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  async function load(options: { runCheck?: boolean } = {}) {
     setLoading(true);
     setError(null);
 
     try {
       const [nextApps, nextStatuses] = await Promise.all([
         api.listApps(),
-        api.appStatuses().catch(() => [])
+        (options.runCheck ? api.runAppStatusCheck() : api.appStatuses()).catch(
+          () => api.appStatuses().catch(() => [])
+        )
       ]);
 
       setApps(nextApps);
@@ -73,9 +75,9 @@ export function Dashboard({ onOpenAdmin }: Props) {
         <div className="flex gap-2">
           <button
             className="grid h-11 w-11 place-items-center rounded border border-black/10 bg-white text-black/65 transition hover:text-black dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
-            onClick={() => void load()}
-            title="Refresh apps"
-            aria-label="Refresh apps"
+            onClick={() => void load({ runCheck: true })}
+            title="Check service health"
+            aria-label="Check service health"
           >
             <RefreshCw size={18} />
           </button>

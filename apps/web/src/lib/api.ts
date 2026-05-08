@@ -129,18 +129,53 @@ export type AppPayload = {
 };
 
 const tokenKey = 'naviproxy-admin-token';
+let memoryToken = '';
+
+function readStoredToken() {
+  try {
+    const sessionToken = sessionStorage.getItem(tokenKey);
+
+    if (sessionToken) {
+      return sessionToken;
+    }
+
+    const legacyToken = localStorage.getItem(tokenKey);
+
+    if (legacyToken) {
+      sessionStorage.setItem(tokenKey, legacyToken);
+      localStorage.removeItem(tokenKey);
+      return legacyToken;
+    }
+  } catch {
+    return memoryToken;
+  }
+
+  return '';
+}
 
 export function getAdminToken() {
-  return localStorage.getItem(tokenKey) ?? '';
+  return memoryToken || readStoredToken();
 }
 
 export function setAdminToken(token: string) {
+  memoryToken = token;
+
   if (token) {
-    localStorage.setItem(tokenKey, token);
+    try {
+      sessionStorage.setItem(tokenKey, token);
+      localStorage.removeItem(tokenKey);
+    } catch {
+      // Keep the token in memory for storage-restricted browsers.
+    }
     return;
   }
 
-  localStorage.removeItem(tokenKey);
+  try {
+    sessionStorage.removeItem(tokenKey);
+    localStorage.removeItem(tokenKey);
+  } catch {
+    // Nothing else to clear when browser storage is unavailable.
+  }
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -193,6 +228,10 @@ export const api = {
   health: () => request<HealthInfo>('/api/health'),
   listApps: () => request<NaviApp[]>('/api/apps'),
   appStatuses: () => request<AppStatus[]>('/api/apps/status'),
+  runAppStatusCheck: () =>
+    request<AppStatus[]>('/api/apps/status/check', {
+      method: 'POST'
+    }),
   appHealthHistory: (id: string) =>
     request<AppStatus[]>(`/api/apps/${id}/health-history?limit=24`),
   createApp: (payload: AppPayload) =>

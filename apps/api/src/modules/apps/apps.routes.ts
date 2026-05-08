@@ -29,7 +29,21 @@ export async function registerAppsRoutes(
 
   app.get('/api/apps', async () => appsService.list());
 
-  app.get('/api/apps/status', async () => appsService.checkStatuses());
+  app.get('/api/apps/status', async () => appsService.latestStatuses());
+
+  app.post('/api/apps/status/check', async (request) => {
+    const statuses = await appsService.checkStatuses();
+    const failing = statuses.filter((status) => !status.ok).length;
+
+    auditService.record({
+      action: 'health.check_manual',
+      targetType: 'apps',
+      summary: `Checked ${statuses.length} apps; ${failing} failing`,
+      sourceIp: request.ip
+    });
+
+    return statuses;
+  });
 
   app.get('/api/apps/:id/health-history', async (request) => {
     const { id } = request.params as { id: string };

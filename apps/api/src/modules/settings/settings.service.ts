@@ -44,7 +44,7 @@ export class SettingsService {
     };
   }
 
-  update(input: unknown, options: { adminTokenConfigured?: boolean } = {}) {
+  normalize(input: unknown, options: { adminTokenConfigured?: boolean } = {}) {
     const current = this.getAll();
     const patch = input && typeof input === 'object' ? input : {};
     const next: NaviSettings = {
@@ -75,6 +75,11 @@ export class SettingsService {
     if (next.dashboardAuthRequired && !options.adminTokenConfigured) {
       throw new Error('ADMIN_TOKEN must be configured before requiring dashboard auth.');
     }
+
+    return next;
+  }
+
+  save(next: NaviSettings) {
     const upsert = this.db.prepare(
       `INSERT INTO app_settings (key, value, updated_at)
       VALUES (?, ?, CURRENT_TIMESTAMP)
@@ -83,13 +88,21 @@ export class SettingsService {
         updated_at = CURRENT_TIMESTAMP`
     );
 
+    upsert.run('tlsMode', next.tlsMode);
+    upsert.run('dashboardAuthRequired', String(next.dashboardAuthRequired));
+    upsert.run(
+      'healthCheckIntervalSeconds',
+      String(next.healthCheckIntervalSeconds)
+    );
+
+    return next;
+  }
+
+  update(input: unknown, options: { adminTokenConfigured?: boolean } = {}) {
+    const next = this.normalize(input, options);
+
     this.db.transaction(() => {
-      upsert.run('tlsMode', next.tlsMode);
-      upsert.run('dashboardAuthRequired', String(next.dashboardAuthRequired));
-      upsert.run(
-        'healthCheckIntervalSeconds',
-        String(next.healthCheckIntervalSeconds)
-      );
+      this.save(next);
     })();
 
     return next;
