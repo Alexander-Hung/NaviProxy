@@ -62,6 +62,7 @@ Edit `/etc/naviproxy/naviproxy.env`:
 HOST=0.0.0.0
 PORT=3001
 ADMIN_TOKEN=
+DASHBOARD_AUTH_REQUIRED=false
 CORS_ORIGIN=
 DATABASE_PATH=/opt/naviproxy/data/naviproxy.sqlite
 WEB_DIST_PATH=/opt/naviproxy/apps/web/dist
@@ -72,10 +73,11 @@ NAVIPROXY_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
 ```
 
 Set `ADMIN_TOKEN` to require a token before anyone can create, edit, delete,
-import, export, reorder, or sync services from the admin UI. Leave it empty only
-for trusted local development. `CORS_ORIGIN` can be left empty for same-origin
-dashboard usage, set to `*` for permissive development, or set to a comma-separated
-list of allowed origins.
+import, export, reorder, or sync services from the admin UI. Set
+`DASHBOARD_AUTH_REQUIRED=true` to protect the read-only dashboard list too.
+Leave tokens empty only for trusted local development. `CORS_ORIGIN` can be left
+empty for same-origin dashboard usage, set to `*` for permissive development, or
+set to a comma-separated list of allowed origins.
 
 ## 4. Enable Caddy Admin API
 
@@ -164,6 +166,8 @@ or a wildcard record:
 - Subdomain mode is recommended.
 - Use LAN target URL origins like `http://192.168.1.20:8096`, without path,
   query, or hash components.
+- Use the Admin page local service scan to discover software already listening
+  on the NaviProxy host and prefill app targets from those ports.
 - Keep Caddy Admin API bound to `127.0.0.1`.
 - If you use port `80` for proxied apps, keep NaviProxy itself on `3001`.
 - Back up `/opt/naviproxy/data/naviproxy.sqlite`, or use the admin UI export

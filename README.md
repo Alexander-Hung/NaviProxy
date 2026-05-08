@@ -69,10 +69,11 @@ Optional hardening:
 
 ```bash
 ADMIN_TOKEN='choose-a-long-token'
+DASHBOARD_AUTH_REQUIRED=false
 CORS_ORIGIN='http://naviproxy.lab.home'
 ```
 
-When `ADMIN_TOKEN` is set, the dashboard can still be viewed without a token, but admin actions require the token in the Admin page. The Admin page also includes health checks, DNS diagnostics, sync history, JSON import/export, and manual app ordering.
+When `ADMIN_TOKEN` is set, the dashboard can still be viewed without a token unless `DASHBOARD_AUTH_REQUIRED=true` is set or enabled in settings. Admin actions require the token in the Admin page. The Admin page also includes categories, tags, favorites, health history, local listening port discovery, DNS diagnostics, TLS mode settings, sync history, full backup/restore, JSON import/export, and manual app ordering.
 
 ## First MVP Behavior
 

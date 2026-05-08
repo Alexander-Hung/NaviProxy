@@ -25,6 +25,10 @@ function isPublicApi(request: FastifyRequest) {
 
   const url = request.url.split('?')[0];
 
+  if (config.dashboardAuthRequired) {
+    return url === '/api/health';
+  }
+
   return url === '/api/health' || url === '/api/apps';
 }
 
@@ -42,13 +46,34 @@ function tokenMatches(candidate: string | null) {
   );
 }
 
-export function registerAdminAuth(app: FastifyInstance) {
+export function registerAdminAuth(
+  app: FastifyInstance,
+  options: { dashboardAuthRequired?: () => boolean } = {}
+) {
   app.addHook('onRequest', async (request, reply) => {
-    if (!config.adminToken || !request.url.startsWith('/api/')) {
+    if (!request.url.startsWith('/api/')) {
       return;
     }
 
-    if (isPublicApi(request)) {
+    const url = request.url.split('?')[0];
+    const dashboardApiRequiresAuth =
+      options.dashboardAuthRequired?.() && url === '/api/apps';
+
+    if (!config.adminToken) {
+      if (dashboardApiRequiresAuth) {
+        return reply.code(503).send({
+          message:
+            'Dashboard auth is required, but ADMIN_TOKEN is not configured on the API.'
+        });
+      }
+
+      return;
+    }
+
+    if (
+      isPublicApi(request) &&
+      !dashboardApiRequiresAuth
+    ) {
       return;
     }
 

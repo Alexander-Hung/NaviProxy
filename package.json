@@ -11,9 +11,12 @@
     "build": "npm run build -w @naviproxy/api && npm run build -w @naviproxy/web",
     "lint": "npm run lint -w @naviproxy/api && npm run lint -w @naviproxy/web",
     "start": "npm run start -w @naviproxy/api",
-    "typecheck": "npm run typecheck -w @naviproxy/api && npm run typecheck -w @naviproxy/web"
+    "typecheck": "npm run typecheck -w @naviproxy/api && npm run typecheck -w @naviproxy/web",
+    "test": "npm run test -w @naviproxy/api",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@typescript-eslint/eslint-plugin": "^7.16.0",
     "@typescript-eslint/parser": "^7.16.0",
     "concurrently": "^8.2.2"

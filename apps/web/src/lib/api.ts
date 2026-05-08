@@ -13,6 +13,9 @@ export type NaviApp = {
   publicPath: string | null;
   enabled: boolean;
   sortOrder: number;
+  category: string | null;
+  tags: string[];
+  favorite: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -50,6 +53,17 @@ export type ProxyHistoryItem = {
   createdAt: string;
 };
 
+export type ProxyDiagnostics = {
+  tlsMode: 'http' | 'auto_https' | 'internal_ca';
+  caddyListen: string[];
+  port443: {
+    available: boolean;
+    error: string | null;
+  };
+  warnings: string[];
+  renderedConfig: unknown;
+};
+
 export type HealthInfo = {
   ok: boolean;
   name: string;
@@ -63,6 +77,42 @@ export type DnsDiagnostic = {
   matchesLocalAddress: boolean;
 };
 
+export type LocalService = {
+  address: string;
+  port: number;
+  pid: number | null;
+  processName: string | null;
+  targetUrl: string;
+};
+
+export type NaviSettings = {
+  tlsMode: 'http' | 'auto_https' | 'internal_ca';
+  dashboardAuthRequired: boolean;
+  healthCheckIntervalSeconds: number;
+};
+
+export type AuditLog = {
+  id: string;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  summary: string;
+  sourceIp: string | null;
+  createdAt: string;
+};
+
+export type BackupSnapshot = {
+  id: string;
+  reason: string;
+  createdAt: string;
+  payload: {
+    exportedAt: string;
+    version: number;
+    apps: NaviApp[];
+    settings: NaviSettings;
+  };
+};
+
 export type AppPayload = {
   name: string;
   iconType: IconType;
@@ -73,6 +123,9 @@ export type AppPayload = {
   publicPath: string | null;
   enabled: boolean;
   sortOrder: number;
+  category: string | null;
+  tags: string[];
+  favorite: boolean;
 };
 
 const tokenKey = 'naviproxy-admin-token';
@@ -140,6 +193,8 @@ export const api = {
   health: () => request<HealthInfo>('/api/health'),
   listApps: () => request<NaviApp[]>('/api/apps'),
   appStatuses: () => request<AppStatus[]>('/api/apps/status'),
+  appHealthHistory: (id: string) =>
+    request<AppStatus[]>(`/api/apps/${id}/health-history?limit=24`),
   createApp: (payload: AppPayload) =>
     request<AppMutationResult>('/api/apps', {
       method: 'POST',
@@ -167,8 +222,37 @@ export const api = {
       body: JSON.stringify({ mode: 'replace', apps })
     }),
   proxyHistory: () => request<ProxyHistoryItem[]>('/api/proxy/history?limit=8'),
+  proxyDiagnostics: () =>
+    request<ProxyDiagnostics>('/api/proxy/diagnostics'),
   dnsDiagnostic: (host: string) =>
     request<DnsDiagnostic>(`/api/diagnostics/dns?host=${encodeURIComponent(host)}`),
+  auditLogs: () => request<AuditLog[]>('/api/audit?limit=20'),
+  localServices: () =>
+    request<{ scannedAt: string; services: LocalService[] }>(
+      '/api/diagnostics/local-services'
+    ),
+  settings: () => request<NaviSettings>('/api/settings'),
+  updateSettings: (payload: Partial<NaviSettings>) =>
+    request<NaviSettings>('/api/settings', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+  backup: () =>
+    request<{
+      exportedAt: string;
+      version: number;
+      apps: NaviApp[];
+      settings: NaviSettings;
+    }>('/api/backup'),
+  restoreBackup: (payload: unknown) =>
+    request<AppListMutationResult & { settings: NaviSettings }>(
+      '/api/backup/restore',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      }
+    ),
+  backupSnapshots: () => request<BackupSnapshot[]>('/api/backup/snapshots'),
   syncProxy: () =>
     request<ProxySync>('/api/proxy/sync', {
       method: 'POST'

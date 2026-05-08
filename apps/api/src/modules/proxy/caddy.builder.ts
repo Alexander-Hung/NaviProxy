@@ -1,4 +1,5 @@
 import type { AppRecord } from '../apps/apps.types.js';
+import type { TlsMode } from '../settings/settings.service.js';
 
 type CaddyRoute = Record<string, unknown>;
 
@@ -75,7 +76,8 @@ function buildDashboardRoute(dashboardTargetUrl: string): CaddyRoute {
 export function buildCaddyConfig(
   apps: AppRecord[],
   listen: string,
-  dashboardTargetUrl: string
+  dashboardTargetUrl: string,
+  tlsMode: TlsMode = 'http'
 ) {
   const routes = apps.map((app) =>
     app.routeMode === 'subdomain'
@@ -85,16 +87,38 @@ export function buildCaddyConfig(
 
   routes.push(buildDashboardRoute(dashboardTargetUrl));
 
-  return {
+  const server = {
+    listen: tlsMode === 'http' ? [listen] : [listen, ':443'],
+    routes,
+    ...(tlsMode === 'http' ? {} : { tls_connection_policies: [{}] })
+  };
+  const config = {
     apps: {
       http: {
         servers: {
-          naviproxy: {
-            listen: [listen],
-            routes
-          }
+          naviproxy: server
         }
       }
     }
   };
+
+  if (tlsMode === 'internal_ca') {
+    return {
+      ...config,
+      apps: {
+        ...config.apps,
+        tls: {
+          automation: {
+            policies: [
+              {
+                issuers: [{ module: 'internal' }]
+              }
+            ]
+          }
+        }
+      }
+    };
+  }
+
+  return config;
 }

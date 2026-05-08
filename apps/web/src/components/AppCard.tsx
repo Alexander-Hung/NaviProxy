@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ExternalLink,
   Globe2,
+  Info,
   Pencil,
   Route,
   Trash2,
@@ -16,6 +17,7 @@ type Props = {
   status?: AppStatus;
   onEdit?: (app: NaviApp) => void;
   onDelete?: (app: NaviApp) => void;
+  onDetails?: (app: NaviApp) => void;
   onMoveUp?: (app: NaviApp) => void;
   onMoveDown?: (app: NaviApp) => void;
 };
@@ -52,6 +54,7 @@ export function AppCard({
   status,
   onEdit,
   onDelete,
+  onDetails,
   onMoveUp,
   onMoveDown
 }: Props) {
@@ -63,7 +66,7 @@ export function AppCard({
         <div className="grid h-12 w-12 shrink-0 place-items-center rounded bg-[#e8f3ef] text-spruce dark:bg-[#203c36] dark:text-[#9be8d7]">
           <Icon app={app} />
         </div>
-        {onEdit || onDelete || onMoveUp || onMoveDown ? (
+        {onEdit || onDelete || onDetails || onMoveUp || onMoveDown ? (
           <div className="flex gap-1">
             {onMoveUp ? (
               <button
@@ -95,6 +98,16 @@ export function AppCard({
                 <Pencil size={17} />
               </button>
             ) : null}
+            {onDetails ? (
+              <button
+                className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-spruce/10 hover:text-spruce dark:text-[#a9bbb4] dark:hover:bg-[#8fe0ce]/10 dark:hover:text-[#9be8d7]"
+                onClick={() => onDetails(app)}
+                title="App details"
+                aria-label="App details"
+              >
+                <Info size={17} />
+              </button>
+            ) : null}
             {onDelete ? (
               <button
                 className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-coral/10 hover:text-coral dark:text-[#a9bbb4] dark:hover:bg-coral/15 dark:hover:text-[#ff9b8c]"
@@ -111,6 +124,28 @@ export function AppCard({
 
       <div>
         <h2 className="mt-4 truncate text-lg font-semibold">{app.name}</h2>
+        {(app.favorite || app.category || app.tags.length > 0) ? (
+          <div className="mt-2 flex flex-wrap gap-1">
+            {app.favorite ? (
+              <span className="rounded bg-amber/15 px-2 py-0.5 text-xs font-semibold text-amber">
+                Favorite
+              </span>
+            ) : null}
+            {app.category ? (
+              <span className="rounded bg-spruce/10 px-2 py-0.5 text-xs font-semibold text-spruce dark:text-[#9be8d7]">
+                {app.category}
+              </span>
+            ) : null}
+            {app.tags.slice(0, 3).map((tag) => (
+              <span
+                key={tag}
+                className="rounded bg-black/5 px-2 py-0.5 text-xs text-black/50 dark:bg-white/10 dark:text-[#b8c7c1]"
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null}
         <div className="mt-2 flex items-center gap-2 text-xs text-black/55 dark:text-[#b8c7c1]">
           <Route size={14} />
           <span className="truncate">

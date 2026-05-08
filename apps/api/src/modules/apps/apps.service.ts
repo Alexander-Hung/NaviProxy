@@ -64,9 +64,12 @@ const appInputShape = {
   publicHost: z.string().trim().min(1).max(253).refine(isValidHostname, {
     message: 'Public host must be a valid hostname.'
   }),
-  publicPath: z.string().trim().max(120).nullable().optional(),
-  enabled: z.boolean().default(true),
-  sortOrder: z.number().int().min(0).default(0)
+    publicPath: z.string().trim().max(120).nullable().optional(),
+    enabled: z.boolean().default(true),
+    sortOrder: z.number().int().min(0).default(0),
+    category: z.string().trim().max(60).nullable().optional(),
+    tags: z.array(z.string().trim().min(1).max(40)).max(12).default([]),
+    favorite: z.boolean().default(false)
 };
 
 function refineRoute(
@@ -156,6 +159,10 @@ function normalizePublicPath(value: string) {
   return normalized || '/';
 }
 
+function normalizeTags(tags: string[]) {
+  return [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))].slice(0, 12);
+}
+
 function normalizeAppInput(input: unknown, fallbackSlug?: string): AppInput {
   const parsed = appInputSchema.parse(input);
   const url = new URL(parsed.targetUrl);
@@ -170,7 +177,10 @@ function normalizeAppInput(input: unknown, fallbackSlug?: string): AppInput {
       parsed.routeMode === 'subpath'
         ? normalizePublicPath(parsed.publicPath || `/${slug}`)
         : null,
-    iconValue: parsed.iconValue || null
+    iconValue: parsed.iconValue || null,
+    category: parsed.category || null,
+    tags: normalizeTags(parsed.tags),
+    favorite: parsed.favorite
   };
 }
 
@@ -269,6 +279,9 @@ export class AppsService {
       publicPath: normalized.publicPath ?? null,
       enabled: normalized.enabled,
       sortOrder,
+      category: normalized.category ?? null,
+      tags: normalized.tags,
+      favorite: normalized.favorite,
       createdAt: now,
       updatedAt: now
     };
@@ -298,6 +311,9 @@ export class AppsService {
       publicPath: normalized.publicPath ?? null,
       enabled: normalized.enabled,
       sortOrder: normalized.sortOrder,
+      category: normalized.category ?? null,
+      tags: normalized.tags,
+      favorite: normalized.favorite,
       createdAt: existing.createdAt,
       updatedAt: existing.updatedAt
     };
@@ -347,7 +363,7 @@ export class AppsService {
   async checkStatuses(): Promise<AppStatus[]> {
     const apps = this.repo.findAll();
 
-    return Promise.all(
+    const statuses = await Promise.all(
       apps.map(async (app) => {
         const startedAt = Date.now();
         const checkedAt = new Date().toISOString();
@@ -379,6 +395,13 @@ export class AppsService {
         }
       })
     );
+
+    this.repo.recordHealthChecks(statuses);
+    return statuses;
+  }
+
+  healthHistory(appId: string, limit = 30) {
+    return this.repo.findHealthHistory(appId, limit);
   }
 
   exportApps() {
@@ -406,6 +429,9 @@ export class AppsService {
         publicPath: normalized.publicPath ?? null,
         enabled: normalized.enabled,
         sortOrder: index,
+        category: normalized.category ?? null,
+        tags: normalized.tags,
+        favorite: normalized.favorite,
         createdAt: now,
         updatedAt: now
       };
@@ -416,5 +442,33 @@ export class AppsService {
     const proxySync = await this.proxyService.syncSafely();
 
     return { apps: savedApps, proxySync };
+  }
+
+  recordBackupSnapshot(reason: string, payload: unknown) {
+    this.db
+      .prepare(
+        `INSERT INTO backup_snapshots (id, reason, payload)
+        VALUES (?, ?, ?)`
+      )
+      .run(nanoid(), reason, JSON.stringify(payload));
+  }
+
+  listBackupSnapshots(limit = 20) {
+    const normalizedLimit = Number.isFinite(limit)
+      ? Math.min(Math.max(limit, 1), 100)
+      : 20;
+    const rows = this.db
+      .prepare(
+        `SELECT id, reason, payload, created_at AS createdAt
+        FROM backup_snapshots
+        ORDER BY created_at DESC
+        LIMIT ?`
+      )
+      .all(normalizedLimit);
+
+    return rows.map((row) => ({
+      ...(row as { id: string; reason: string; createdAt: string }),
+      payload: JSON.parse((row as { payload: string }).payload) as unknown
+    }));
   }
 }

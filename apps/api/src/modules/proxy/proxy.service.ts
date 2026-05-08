@@ -1,17 +1,20 @@
 import crypto from 'node:crypto';
+import net from 'node:net';
 import { nanoid } from 'nanoid';
 import type { NaviDatabase } from '../../db/database.js';
 import { config } from '../../config.js';
 import type { AppsRepo } from '../apps/apps.repo.js';
 import { buildCaddyConfig } from './caddy.builder.js';
 import { CaddyClient } from './caddy.client.js';
+import type { SettingsService } from '../settings/settings.service.js';
 
 export class ProxyService {
   private readonly caddy = new CaddyClient(config.caddyAdminUrl);
 
   constructor(
     private readonly db: NaviDatabase,
-    private readonly appsRepo: AppsRepo
+    private readonly appsRepo: AppsRepo,
+    private readonly settingsService: SettingsService
   ) {}
 
   async sync() {
@@ -19,7 +22,8 @@ export class ProxyService {
     const caddyConfig = buildCaddyConfig(
       apps,
       config.caddyListen,
-      config.dashboardTargetUrl
+      config.dashboardTargetUrl,
+      this.settingsService.getAll().tlsMode
     );
     const hash = crypto
       .createHash('sha256')
@@ -60,11 +64,41 @@ export class ProxyService {
     return buildCaddyConfig(
       this.appsRepo.findEnabled(),
       config.caddyListen,
-      config.dashboardTargetUrl
+      config.dashboardTargetUrl,
+      this.settingsService.getAll().tlsMode
     );
   }
 
+  async getDiagnostics() {
+    const settings = this.settingsService.getAll();
+    const port443 = await checkPortAvailable(443);
+
+    return {
+      tlsMode: settings.tlsMode,
+      caddyListen: [config.caddyListen],
+      port443: {
+        available: port443.available,
+        error: port443.message
+      },
+      renderedConfig: this.getRenderedConfig(),
+      warnings: [
+        ...(settings.tlsMode === 'http'
+          ? []
+          : port443.available
+            ? []
+            : [`Port 443 is not available: ${port443.message}`]),
+        ...(settings.tlsMode === 'internal_ca'
+          ? ['Internal CA certificates must be trusted by client devices.']
+          : [])
+      ]
+    };
+  }
+
   listHistory(limit = 20) {
+    const normalizedLimit = Number.isFinite(limit)
+      ? Math.min(Math.max(limit, 1), 100)
+      : 20;
+
     return this.db
       .prepare(
         `SELECT
@@ -77,7 +111,7 @@ export class ProxyService {
         ORDER BY created_at DESC
         LIMIT ?`
       )
-      .all(Math.min(Math.max(limit, 1), 100));
+      .all(normalizedLimit);
   }
 
   private recordVersion(
@@ -93,4 +127,28 @@ export class ProxyService {
       )
       .run(nanoid(), hash, status, errorMessage);
   }
+}
+
+function checkPortAvailable(port: number) {
+  return new Promise<{ available: boolean; message: string | null }>((resolve) => {
+    const server = net.createServer();
+
+    server.once('error', (error) => {
+      resolve({
+        available: false,
+        message: error.message
+      });
+    });
+
+    server.once('listening', () => {
+      server.close(() =>
+        resolve({
+          available: true,
+          message: null
+        })
+      );
+    });
+
+    server.listen(port, '0.0.0.0');
+  });
 }

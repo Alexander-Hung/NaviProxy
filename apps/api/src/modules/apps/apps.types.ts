@@ -13,6 +13,9 @@ export type AppRecord = {
   publicPath: string | null;
   enabled: boolean;
   sortOrder: number;
+  category: string | null;
+  tags: string[];
+  favorite: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -29,6 +32,9 @@ export type AppRow = {
   public_path: string | null;
   enabled: number;
   sort_order: number;
+  category: string | null;
+  tags: string;
+  favorite: number;
   created_at: string;
   updated_at: string;
 };

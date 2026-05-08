@@ -1,0 +1,3 @@
+-- App metadata, health history, settings, audit, and backup snapshot tables.
+-- The runtime migration runner keeps this id in schema_migrations and applies
+-- compatibility ALTER TABLE statements for existing SQLite files.

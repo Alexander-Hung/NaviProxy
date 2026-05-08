@@ -10,6 +10,8 @@ type Props = {
 export function Dashboard({ onOpenAdmin }: Props) {
   const [apps, setApps] = useState<NaviApp[]>([]);
   const [statuses, setStatuses] = useState<Record<string, AppStatus>>({});
+  const [search, setSearch] = useState('');
+  const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,7 +40,19 @@ export function Dashboard({ onOpenAdmin }: Props) {
     void load();
   }, []);
 
-  const enabledApps = apps.filter((app) => app.enabled);
+  const enabledApps = apps.filter((app) => {
+    const query = search.trim().toLowerCase();
+    const text = [
+      app.name,
+      app.publicHost,
+      app.category ?? '',
+      ...app.tags
+    ]
+      .join(' ')
+      .toLowerCase();
+
+    return app.enabled && (!favoriteOnly || app.favorite) && (!query || text.includes(query));
+  });
 
   return (
     <div className="pb-20 sm:pb-0">
@@ -80,6 +94,24 @@ export function Dashboard({ onOpenAdmin }: Props) {
           {error}
         </div>
       ) : null}
+
+      <div className="mt-6 grid gap-3 rounded border border-black/10 bg-white p-3 dark:border-white/15 dark:bg-[#141d1a] sm:grid-cols-[minmax(0,1fr),auto]">
+        <input
+          className="field"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search services, categories, tags"
+        />
+        <label className="flex h-11 items-center gap-2 text-sm font-medium text-black/70 dark:text-[#d7e4df]">
+          <input
+            type="checkbox"
+            className="h-4 w-4 accent-spruce"
+            checked={favoriteOnly}
+            onChange={(event) => setFavoriteOnly(event.target.checked)}
+          />
+          Favorites
+        </label>
+      </div>
 
       {loading ? (
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

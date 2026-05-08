@@ -1,7 +1,19 @@
 import type { NaviDatabase } from '../../db/database.js';
-import type { AppRecord, AppRow } from './apps.types.js';
+import { nanoid } from 'nanoid';
+import type { AppRecord, AppRow, AppStatus } from './apps.types.js';
 
 function toRecord(row: AppRow): AppRecord {
+  let tags: string[] = [];
+
+  try {
+    const parsed = JSON.parse(row.tags);
+    tags = Array.isArray(parsed)
+      ? parsed.filter((tag): tag is string => typeof tag === 'string')
+      : [];
+  } catch {
+    tags = [];
+  }
+
   return {
     id: row.id,
     name: row.name,
@@ -14,6 +26,9 @@ function toRecord(row: AppRow): AppRecord {
     publicPath: row.public_path,
     enabled: row.enabled === 1,
     sortOrder: row.sort_order,
+    category: row.category,
+    tags,
+    favorite: row.favorite === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -63,15 +78,17 @@ export class AppsRepo {
       .prepare(
         `INSERT INTO apps (
           id, name, slug, icon_type, icon_value, target_url, route_mode,
-          public_host, public_path, enabled, sort_order
+          public_host, public_path, enabled, sort_order, category, tags, favorite
         ) VALUES (
           @id, @name, @slug, @iconType, @iconValue, @targetUrl, @routeMode,
-          @publicHost, @publicPath, @enabled, @sortOrder
+          @publicHost, @publicPath, @enabled, @sortOrder, @category, @tags, @favorite
         )`
       )
       .run({
         ...app,
-        enabled: app.enabled ? 1 : 0
+        enabled: app.enabled ? 1 : 0,
+        tags: JSON.stringify(app.tags),
+        favorite: app.favorite ? 1 : 0
       });
 
     return this.findById(app.id);
@@ -91,13 +108,18 @@ export class AppsRepo {
           public_path = @publicPath,
           enabled = @enabled,
           sort_order = @sortOrder,
+          category = @category,
+          tags = @tags,
+          favorite = @favorite,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = @id`
       )
       .run({
         id,
         ...patch,
-        enabled: patch.enabled ? 1 : 0
+        enabled: patch.enabled ? 1 : 0,
+        tags: JSON.stringify(patch.tags),
+        favorite: patch.favorite ? 1 : 0
       });
 
     return this.findById(id);
@@ -121,10 +143,12 @@ export class AppsRepo {
     const insert = this.db.prepare(
       `INSERT INTO apps (
         id, name, slug, icon_type, icon_value, target_url, route_mode,
-        public_host, public_path, enabled, sort_order, created_at, updated_at
+        public_host, public_path, enabled, sort_order, category, tags, favorite,
+        created_at, updated_at
       ) VALUES (
         @id, @name, @slug, @iconType, @iconValue, @targetUrl, @routeMode,
-        @publicHost, @publicPath, @enabled, @sortOrder, @createdAt, @updatedAt
+        @publicHost, @publicPath, @enabled, @sortOrder, @category, @tags,
+        @favorite, @createdAt, @updatedAt
       )`
     );
 
@@ -134,11 +158,73 @@ export class AppsRepo {
       for (const app of apps) {
         insert.run({
           ...app,
-          enabled: app.enabled ? 1 : 0
+          enabled: app.enabled ? 1 : 0,
+          tags: JSON.stringify(app.tags),
+          favorite: app.favorite ? 1 : 0
         });
       }
     })();
 
     return this.findAll();
+  }
+
+  recordHealthChecks(statuses: AppStatus[]) {
+    const insert = this.db.prepare(
+      `INSERT INTO app_health_checks (
+        id, app_id, ok, status_code, response_time_ms, error, checked_at
+      ) VALUES (
+        @id, @appId, @ok, @statusCode, @responseTimeMs, @error, @checkedAt
+      )`
+    );
+
+    this.db.transaction(() => {
+      for (const status of statuses) {
+        insert.run({
+          id: nanoid(),
+          appId: status.id,
+          ok: status.ok ? 1 : 0,
+          statusCode: status.statusCode,
+          responseTimeMs: status.responseTimeMs,
+          error: status.error,
+          checkedAt: status.checkedAt
+        });
+      }
+
+      this.db
+        .prepare(
+          `DELETE FROM app_health_checks
+          WHERE id IN (
+            SELECT old.id FROM app_health_checks old
+            WHERE (
+              SELECT COUNT(*) FROM app_health_checks newer
+              WHERE newer.app_id = old.app_id
+                AND newer.checked_at >= old.checked_at
+            ) > 100
+          )`
+        )
+        .run();
+    })();
+  }
+
+  findHealthHistory(appId: string, limit = 30) {
+    return this.db
+      .prepare(
+        `SELECT
+          app_id AS id,
+          ok,
+          status_code AS statusCode,
+          response_time_ms AS responseTimeMs,
+          checked_at AS checkedAt,
+          error
+        FROM app_health_checks
+        WHERE app_id = ?
+        ORDER BY checked_at DESC
+        LIMIT ?`
+      )
+      .all(appId, Math.min(Math.max(limit, 1), 100))
+      .map((row) => ({
+        ...(row as Omit<AppStatus, 'ok'> & { ok: number }),
+        ok: (row as { ok: number }).ok === 1
+      }));
   }
 }
