@@ -1,8 +1,27 @@
 import path from 'node:path';
 
+function parseCorsOrigin(value: string | undefined) {
+  if (!value) {
+    return false;
+  }
+
+  if (value === '*') {
+    return true;
+  }
+
+  const origins = value
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return origins.length === 1 ? origins[0] : origins;
+}
+
 export const config = {
   host: process.env.HOST ?? '0.0.0.0',
   port: Number(process.env.PORT ?? 3001),
+  adminToken: process.env.ADMIN_TOKEN ?? '',
+  corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
   databasePath:
     process.env.DATABASE_PATH ??
     path.resolve(process.cwd(), '../../data/naviproxy.sqlite'),

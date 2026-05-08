@@ -84,6 +84,8 @@ write_env() {
     cat >"$ROOT_DIR/.naviproxy.env.tmp" <<EOF
 HOST=0.0.0.0
 PORT=3001
+ADMIN_TOKEN=
+CORS_ORIGIN=
 DATABASE_PATH=$DATA_DIR/naviproxy.sqlite
 WEB_DIST_PATH=$ROOT_DIR/apps/web/dist
 CADDY_ADMIN_URL=http://127.0.0.1:2019

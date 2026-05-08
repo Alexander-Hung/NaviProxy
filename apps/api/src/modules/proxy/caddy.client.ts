@@ -3,8 +3,9 @@ export class CaddyClient {
 
   async loadConfig(config: unknown) {
     const admin = new URL(this.adminUrl);
+    const loadUrl = new URL('/load', admin);
 
-    const response = await fetch(`${this.adminUrl}/load`, {
+    const response = await fetch(loadUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

@@ -3,8 +3,10 @@ import fastifyStatic from '@fastify/static';
 import Fastify from 'fastify';
 import fs from 'node:fs';
 import path from 'node:path';
+import { registerAdminAuth } from './auth.js';
 import { config } from './config.js';
 import { createDatabase } from './db/database.js';
+import { registerDiagnosticsRoutes } from './modules/diagnostics/diagnostics.routes.js';
 import { AppsRepo } from './modules/apps/apps.repo.js';
 import { AppsService } from './modules/apps/apps.service.js';
 import { registerAppsRoutes } from './modules/apps/apps.routes.js';
@@ -40,11 +42,14 @@ app.addContentTypeParser(
 );
 
 await app.register(cors, {
-  origin: true
+  origin: config.corsOrigin
 });
+
+registerAdminAuth(app);
 
 await registerAppsRoutes(app, appsService);
 await registerProxyRoutes(app, proxyService);
+await registerDiagnosticsRoutes(app);
 
 const indexPath = path.join(config.webDistPath, 'index.html');
 const faviconPath = path.join(config.webDistPath, 'favicon.ico');

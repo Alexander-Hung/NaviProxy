@@ -1,7 +1,7 @@
 import { Plus, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { AppCard } from '../components/AppCard';
-import { api, type NaviApp } from '../lib/api';
+import { api, type AppStatus, type NaviApp } from '../lib/api';
 
 type Props = {
   onOpenAdmin: () => void;
@@ -9,6 +9,7 @@ type Props = {
 
 export function Dashboard({ onOpenAdmin }: Props) {
   const [apps, setApps] = useState<NaviApp[]>([]);
+  const [statuses, setStatuses] = useState<Record<string, AppStatus>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +18,15 @@ export function Dashboard({ onOpenAdmin }: Props) {
     setError(null);
 
     try {
-      setApps(await api.listApps());
+      const [nextApps, nextStatuses] = await Promise.all([
+        api.listApps(),
+        api.appStatuses().catch(() => [])
+      ]);
+
+      setApps(nextApps);
+      setStatuses(
+        Object.fromEntries(nextStatuses.map((status) => [status.id, status]))
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -84,7 +93,7 @@ export function Dashboard({ onOpenAdmin }: Props) {
       ) : enabledApps.length > 0 ? (
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {enabledApps.map((app) => (
-            <AppCard key={app.id} app={app} />
+            <AppCard key={app.id} app={app} status={statuses[app.id]} />
           ))}
         </div>
       ) : (

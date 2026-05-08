@@ -1,8 +1,28 @@
-import { Plus, RefreshCw, Save, X } from 'lucide-react';
-import { FormEvent, useEffect, useState } from 'react';
+import {
+  Download,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Shield,
+  Upload,
+  X
+} from 'lucide-react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
 import { AppCard } from '../components/AppCard';
 import { RouteModeWarning } from '../components/RouteModeWarning';
-import { api, type AppPayload, type NaviApp, type RouteMode } from '../lib/api';
+import {
+  api,
+  getAdminToken,
+  setAdminToken,
+  type AppPayload,
+  type AppStatus,
+  type DnsDiagnostic,
+  type NaviApp,
+  type ProxyHistoryItem,
+  type ProxySync,
+  type RouteMode
+} from '../lib/api';
 
 type Props = {
   onBack: () => void;
@@ -22,8 +42,14 @@ const initialForm: AppPayload = {
 
 export function Admin({ onBack }: Props) {
   const [apps, setApps] = useState<NaviApp[]>([]);
+  const [statuses, setStatuses] = useState<Record<string, AppStatus>>({});
+  const [history, setHistory] = useState<ProxyHistoryItem[]>([]);
   const [form, setForm] = useState<AppPayload>(initialForm);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [authRequired, setAuthRequired] = useState(false);
+  const [tokenInput, setTokenInput] = useState(getAdminToken());
+  const [dnsHost, setDnsHost] = useState('');
+  const [dnsResult, setDnsResult] = useState<DnsDiagnostic | null>(null);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -31,7 +57,27 @@ export function Admin({ onBack }: Props) {
 
   async function load() {
     setError(null);
-    setApps(await api.listApps());
+    const [health, nextApps, nextStatuses] = await Promise.all([
+      api.health().catch(() => null),
+      api.listApps(),
+      api.appStatuses().catch(() => [])
+    ]);
+
+    setAuthRequired(Boolean(health?.authRequired));
+    setApps(nextApps);
+    setStatuses(
+      Object.fromEntries(nextStatuses.map((status) => [status.id, status]))
+    );
+
+    await loadHistory();
+  }
+
+  async function loadHistory() {
+    try {
+      setHistory(await api.proxyHistory());
+    } catch {
+      setHistory([]);
+    }
   }
 
   useEffect(() => {
@@ -39,6 +85,34 @@ export function Admin({ onBack }: Props) {
       setError(err instanceof Error ? err.message : String(err))
     );
   }, []);
+
+  const sortedApps = useMemo(
+    () => [...apps].sort((left, right) => left.sortOrder - right.sortOrder),
+    [apps]
+  );
+
+  function proxySyncMessage(sync?: ProxySync) {
+    if (!sync) {
+      return 'Saved.';
+    }
+
+    if (sync.status === 'success') {
+      return 'Saved and Caddy configuration synced.';
+    }
+
+    if (sync.status === 'skipped') {
+      return 'Saved. Caddy sync is disabled in the API environment.';
+    }
+
+    return `Saved, but Caddy sync failed: ${sync.errorMessage ?? 'Unknown error'}`;
+  }
+
+  function saveToken() {
+    setAdminToken(tokenInput.trim());
+    setMessage(tokenInput.trim() ? 'Admin token saved for this browser.' : 'Admin token cleared.');
+    setError(null);
+    void load();
+  }
 
   function update<K extends keyof AppPayload>(key: K, value: AppPayload[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -85,11 +159,14 @@ export function Admin({ onBack }: Props) {
 
     try {
       if (editingId) {
-        await api.updateApp(editingId, form);
-        setMessage('App updated and proxy configuration queued.');
+        const result = await api.updateApp(editingId, form);
+        setMessage(proxySyncMessage(result.proxySync));
       } else {
-        await api.createApp(form);
-        setMessage('App saved and proxy configuration queued.');
+        const result = await api.createApp({
+          ...form,
+          sortOrder: apps.length
+        });
+        setMessage(proxySyncMessage(result.proxySync));
       }
 
       setEditingId(null);
@@ -102,13 +179,17 @@ export function Admin({ onBack }: Props) {
     }
   }
 
-  async function deleteApp(id: string) {
+  async function deleteApp(app: NaviApp) {
+    if (!window.confirm(`Delete ${app.name}?`)) {
+      return;
+    }
+
     setError(null);
     setMessage(null);
 
     try {
-      await api.deleteApp(id);
-      setMessage('App deleted.');
+      const result = await api.deleteApp(app.id);
+      setMessage(proxySyncMessage(result.proxySync));
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -125,12 +206,99 @@ export function Admin({ onBack }: Props) {
       setMessage(
         result.status === 'success'
           ? 'Caddy configuration synced.'
-          : 'Caddy sync skipped because it is disabled in the API environment.'
+          : result.status === 'skipped'
+            ? 'Caddy sync skipped because it is disabled in the API environment.'
+            : `Caddy sync failed: ${result.errorMessage ?? 'Unknown error'}`
       );
+      await loadHistory();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function moveApp(app: NaviApp, direction: -1 | 1) {
+    const index = sortedApps.findIndex((item) => item.id === app.id);
+    const target = index + direction;
+
+    if (target < 0 || target >= sortedApps.length) {
+      return;
+    }
+
+    const ids = sortedApps.map((item) => item.id);
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+
+    try {
+      const result = await api.reorderApps(ids);
+      setApps(result.apps);
+      setMessage(proxySyncMessage(result.proxySync));
+      await loadHistory();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function exportApps() {
+    try {
+      const data = await api.exportApps();
+      const blob = new Blob([JSON.stringify(data, null, 2)], {
+        type: 'application/json'
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `naviproxy-apps-${data.exportedAt.slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setMessage('Apps exported.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function importApps(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    if (!window.confirm('Importing will replace all configured apps. Continue?')) {
+      return;
+    }
+
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as { apps?: unknown[] } | unknown[];
+      const importedApps = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed.apps)
+          ? parsed.apps
+          : [];
+
+      if (importedApps.length === 0) {
+        throw new Error('Import file does not contain apps.');
+      }
+
+      const result = await api.importApps(importedApps);
+      setApps(result.apps);
+      setMessage(proxySyncMessage(result.proxySync));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function runDnsDiagnostic() {
+    setDnsResult(null);
+    setError(null);
+
+    try {
+      setDnsResult(await api.dnsDiagnostic(dnsHost.trim()));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
     }
   }
 
@@ -156,6 +324,33 @@ export function Admin({ onBack }: Props) {
             Dashboard
           </button>
         </div>
+
+        {authRequired ? (
+          <div className="mb-4 rounded border border-amber/30 bg-amber/10 p-3 dark:border-amber/40 dark:bg-amber/15">
+            <label className="label" htmlFor="adminToken">
+              Admin token
+            </label>
+            <div className="flex gap-2">
+              <input
+                id="adminToken"
+                className="field"
+                type="password"
+                value={tokenInput}
+                onChange={(event) => setTokenInput(event.target.value)}
+                placeholder="Required for admin actions"
+              />
+              <button
+                className="grid h-11 w-11 shrink-0 place-items-center rounded bg-ink text-white transition hover:bg-spruce dark:bg-[#dff3ec] dark:text-[#0f1714]"
+                type="button"
+                onClick={saveToken}
+                title="Save token"
+                aria-label="Save token"
+              >
+                <Shield size={18} />
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <form className="panel p-4" onSubmit={submit}>
           <div className="grid gap-4">
@@ -343,24 +538,54 @@ export function Admin({ onBack }: Props) {
               {apps.length} configured
             </h2>
           </div>
-          <button
-            className="inline-flex h-10 items-center gap-2 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black disabled:opacity-60 dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
-            onClick={() => void syncProxy()}
-            disabled={syncing}
-          >
-            <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
-            Sync
-          </button>
+          <div className="flex gap-2">
+            <button
+              className="grid h-10 w-10 place-items-center rounded border border-black/10 bg-white text-black/65 transition hover:text-black disabled:opacity-60 dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
+              onClick={() => void exportApps()}
+              title="Export apps"
+              aria-label="Export apps"
+            >
+              <Download size={16} />
+            </button>
+            <label
+              className="grid h-10 w-10 cursor-pointer place-items-center rounded border border-black/10 bg-white text-black/65 transition hover:text-black dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
+              title="Import apps"
+              aria-label="Import apps"
+            >
+              <Upload size={16} />
+              <input
+                className="sr-only"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => void importApps(event)}
+              />
+            </label>
+            <button
+              className="inline-flex h-10 items-center gap-2 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black disabled:opacity-60 dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
+              onClick={() => void syncProxy()}
+              disabled={syncing}
+            >
+              <RefreshCw size={16} className={syncing ? 'animate-spin' : ''} />
+              Sync
+            </button>
+          </div>
         </div>
 
         {apps.length > 0 ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {apps.map((app) => (
+            {sortedApps.map((app, index) => (
               <AppCard
                 key={app.id}
                 app={app}
+                status={statuses[app.id]}
                 onEdit={editApp}
                 onDelete={deleteApp}
+                onMoveUp={index > 0 ? (item) => void moveApp(item, -1) : undefined}
+                onMoveDown={
+                  index < sortedApps.length - 1
+                    ? (item) => void moveApp(item, 1)
+                    : undefined
+                }
               />
             ))}
           </div>
@@ -369,6 +594,86 @@ export function Admin({ onBack }: Props) {
             No services have been configured.
           </div>
         )}
+
+        <div className="mt-6 grid gap-4 lg:grid-cols-2">
+          <section className="panel p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold">DNS diagnostic</h3>
+              <button
+                className="grid h-9 w-9 place-items-center rounded bg-ink text-white transition hover:bg-spruce dark:bg-[#dff3ec] dark:text-[#0f1714]"
+                onClick={() => void runDnsDiagnostic()}
+                title="Check DNS"
+                aria-label="Check DNS"
+                disabled={!dnsHost.trim()}
+              >
+                <Search size={16} />
+              </button>
+            </div>
+            <input
+              className="field"
+              value={dnsHost}
+              onChange={(event) => setDnsHost(event.target.value)}
+              placeholder="jellyfin.lab.home"
+            />
+            {dnsResult ? (
+              <div className="mt-3 space-y-2 text-xs text-black/60 dark:text-[#b8c7c1]">
+                <div>Resolved: {dnsResult.addresses.join(', ') || 'none'}</div>
+                <div>Local: {dnsResult.localAddresses.join(', ') || 'none'}</div>
+                <div
+                  className={
+                    dnsResult.matchesLocalAddress
+                      ? 'font-semibold text-spruce dark:text-[#9be8d7]'
+                      : 'font-semibold text-coral dark:text-[#ff9b8c]'
+                  }
+                >
+                  {dnsResult.matchesLocalAddress
+                    ? 'Host points to this machine.'
+                    : 'Host does not resolve to this machine.'}
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <section className="panel p-4">
+            <h3 className="mb-3 text-sm font-semibold">Sync history</h3>
+            {history.length > 0 ? (
+              <div className="space-y-2">
+                {history.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded border border-black/10 p-2 text-xs dark:border-white/15"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span
+                        className={
+                          item.status === 'success'
+                            ? 'font-semibold text-spruce dark:text-[#9be8d7]'
+                            : item.status === 'failed'
+                              ? 'font-semibold text-coral dark:text-[#ff9b8c]'
+                              : 'font-semibold text-amber'
+                        }
+                      >
+                        {item.status}
+                      </span>
+                      <span className="text-black/45 dark:text-[#9fb0aa]">
+                        {new Date(item.createdAt).toLocaleString()}
+                      </span>
+                    </div>
+                    {item.errorMessage ? (
+                      <div className="mt-1 truncate text-coral dark:text-[#ff9b8c]">
+                        {item.errorMessage}
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-sm text-black/55 dark:text-[#b8c7c1]">
+                No sync history available.
+              </div>
+            )}
+          </section>
+        </div>
       </section>
     </div>
   );

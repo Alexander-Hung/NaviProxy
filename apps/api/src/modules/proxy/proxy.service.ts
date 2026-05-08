@@ -42,12 +42,42 @@ export class ProxyService {
     }
   }
 
+  async syncSafely() {
+    try {
+      return await this.sync();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+
+      return {
+        status: 'failed' as const,
+        hash: null,
+        errorMessage: message
+      };
+    }
+  }
+
   getRenderedConfig() {
     return buildCaddyConfig(
       this.appsRepo.findEnabled(),
       config.caddyListen,
       config.dashboardTargetUrl
     );
+  }
+
+  listHistory(limit = 20) {
+    return this.db
+      .prepare(
+        `SELECT
+          id,
+          caddy_config_hash AS caddyConfigHash,
+          status,
+          error_message AS errorMessage,
+          created_at AS createdAt
+        FROM proxy_config_versions
+        ORDER BY created_at DESC
+        LIMIT ?`
+      )
+      .all(Math.min(Math.max(limit, 1), 100));
   }
 
   private recordVersion(

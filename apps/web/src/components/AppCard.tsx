@@ -1,16 +1,31 @@
-import { ExternalLink, Globe2, Pencil, Route, Trash2 } from 'lucide-react';
-import type { NaviApp } from '../lib/api';
+import {
+  ArrowDown,
+  ArrowUp,
+  CheckCircle2,
+  ExternalLink,
+  Globe2,
+  Pencil,
+  Route,
+  Trash2,
+  XCircle
+} from 'lucide-react';
+import type { AppStatus, NaviApp } from '../lib/api';
 
 type Props = {
   app: NaviApp;
+  status?: AppStatus;
   onEdit?: (app: NaviApp) => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (app: NaviApp) => void;
+  onMoveUp?: (app: NaviApp) => void;
+  onMoveDown?: (app: NaviApp) => void;
 };
 
 function appHref(app: NaviApp) {
   const host = app.publicHost;
   const path = app.routeMode === 'subpath' ? app.publicPath ?? '' : '';
-  return `http://${host}${path}`;
+  const scheme = window.location.protocol === 'https:' ? 'https' : 'http';
+
+  return `${scheme}://${host}${path}`;
 }
 
 function Icon({ app }: { app: NaviApp }) {
@@ -32,7 +47,14 @@ function Icon({ app }: { app: NaviApp }) {
   return <Globe2 size={24} />;
 }
 
-export function AppCard({ app, onEdit, onDelete }: Props) {
+export function AppCard({
+  app,
+  status,
+  onEdit,
+  onDelete,
+  onMoveUp,
+  onMoveDown
+}: Props) {
   const href = appHref(app);
 
   return (
@@ -41,8 +63,28 @@ export function AppCard({ app, onEdit, onDelete }: Props) {
         <div className="grid h-12 w-12 shrink-0 place-items-center rounded bg-[#e8f3ef] text-spruce dark:bg-[#203c36] dark:text-[#9be8d7]">
           <Icon app={app} />
         </div>
-        {onEdit || onDelete ? (
+        {onEdit || onDelete || onMoveUp || onMoveDown ? (
           <div className="flex gap-1">
+            {onMoveUp ? (
+              <button
+                className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-spruce/10 hover:text-spruce dark:text-[#a9bbb4] dark:hover:bg-[#8fe0ce]/10 dark:hover:text-[#9be8d7]"
+                onClick={() => onMoveUp(app)}
+                title="Move up"
+                aria-label="Move up"
+              >
+                <ArrowUp size={17} />
+              </button>
+            ) : null}
+            {onMoveDown ? (
+              <button
+                className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-spruce/10 hover:text-spruce dark:text-[#a9bbb4] dark:hover:bg-[#8fe0ce]/10 dark:hover:text-[#9be8d7]"
+                onClick={() => onMoveDown(app)}
+                title="Move down"
+                aria-label="Move down"
+              >
+                <ArrowDown size={17} />
+              </button>
+            ) : null}
             {onEdit ? (
               <button
                 className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-spruce/10 hover:text-spruce dark:text-[#a9bbb4] dark:hover:bg-[#8fe0ce]/10 dark:hover:text-[#9be8d7]"
@@ -56,7 +98,7 @@ export function AppCard({ app, onEdit, onDelete }: Props) {
             {onDelete ? (
               <button
                 className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-coral/10 hover:text-coral dark:text-[#a9bbb4] dark:hover:bg-coral/15 dark:hover:text-[#ff9b8c]"
-                onClick={() => onDelete(app.id)}
+                onClick={() => onDelete(app)}
                 title="Delete app"
                 aria-label="Delete app"
               >
@@ -80,6 +122,23 @@ export function AppCard({ app, onEdit, onDelete }: Props) {
         <div className="mt-1 truncate text-xs text-black/45 dark:text-[#9fb0aa]">
           {app.targetUrl}
         </div>
+        {status ? (
+          <div
+            className={`mt-3 inline-flex max-w-full items-center gap-1.5 rounded px-2 py-1 text-xs font-semibold ${
+              status.ok
+                ? 'bg-spruce/10 text-spruce dark:bg-[#8fe0ce]/10 dark:text-[#9be8d7]'
+                : 'bg-coral/10 text-coral dark:bg-coral/15 dark:text-[#ff9b8c]'
+            }`}
+            title={status.error ?? undefined}
+          >
+            {status.ok ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+            <span className="truncate">
+              {status.ok
+                ? `${status.statusCode ?? 'OK'} in ${status.responseTimeMs}ms`
+                : status.error ?? 'Offline'}
+            </span>
+          </div>
+        ) : null}
       </div>
 
       <a

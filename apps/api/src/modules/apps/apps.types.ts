@@ -32,3 +32,12 @@ export type AppRow = {
   created_at: string;
   updated_at: string;
 };
+
+export type AppStatus = {
+  id: string;
+  ok: boolean;
+  statusCode: number | null;
+  responseTimeMs: number;
+  checkedAt: string;
+  error: string | null;
+};

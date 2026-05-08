@@ -50,6 +50,14 @@ export class AppsRepo {
     return row ? toRecord(row) : null;
   }
 
+  findBySlug(slug: string) {
+    const row = this.db
+      .prepare('SELECT * FROM apps WHERE slug = ?')
+      .get(slug) as AppRow | undefined;
+
+    return row ? toRecord(row) : null;
+  }
+
   create(app: AppRecord) {
     this.db
       .prepare(
@@ -97,5 +105,40 @@ export class AppsRepo {
 
   delete(id: string) {
     return this.db.prepare('DELETE FROM apps WHERE id = ?').run(id).changes > 0;
+  }
+
+  updateSortOrder(id: string, sortOrder: number) {
+    this.db
+      .prepare(
+        'UPDATE apps SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+      )
+      .run(sortOrder, id);
+
+    return this.findById(id);
+  }
+
+  replaceAll(apps: AppRecord[]) {
+    const insert = this.db.prepare(
+      `INSERT INTO apps (
+        id, name, slug, icon_type, icon_value, target_url, route_mode,
+        public_host, public_path, enabled, sort_order, created_at, updated_at
+      ) VALUES (
+        @id, @name, @slug, @iconType, @iconValue, @targetUrl, @routeMode,
+        @publicHost, @publicPath, @enabled, @sortOrder, @createdAt, @updatedAt
+      )`
+    );
+
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM apps').run();
+
+      for (const app of apps) {
+        insert.run({
+          ...app,
+          enabled: app.enabled ? 1 : 0
+        });
+      }
+    })();
+
+    return this.findAll();
   }
 }
