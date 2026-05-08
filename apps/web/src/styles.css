@@ -13,6 +13,10 @@ body {
     sans-serif;
 }
 
+html.dark {
+  color-scheme: dark;
+}
+
 button,
 input,
 select {
@@ -20,13 +24,13 @@ select {
 }
 
 .field {
-  @apply h-11 w-full rounded border border-black/10 bg-white px-3 text-sm text-ink outline-none transition placeholder:text-black/35 focus:border-spruce focus:ring-4 focus:ring-spruce/15 dark:border-white/10 dark:bg-white/5 dark:text-white dark:placeholder:text-white/35;
+  @apply h-11 w-full rounded border border-black/10 bg-white px-3 text-sm text-ink outline-none transition placeholder:text-black/35 focus:border-spruce focus:ring-4 focus:ring-spruce/15 dark:border-white/15 dark:bg-[#18211e] dark:text-[#f4fbf8] dark:placeholder:text-[#9fb0aa] dark:focus:border-[#8fe0ce] dark:focus:ring-[#8fe0ce]/15;
 }
 
 .label {
-  @apply mb-2 block text-xs font-semibold uppercase tracking-wide text-black/55 dark:text-white/55;
+  @apply mb-2 block text-xs font-semibold uppercase tracking-wide text-black/55 dark:text-[#b8c7c1];
 }
 
 .panel {
-  @apply rounded border border-black/10 bg-white shadow-sm dark:border-white/10 dark:bg-white/[0.04];
+  @apply rounded border border-black/10 bg-white shadow-sm dark:border-white/15 dark:bg-[#141d1a];
 }

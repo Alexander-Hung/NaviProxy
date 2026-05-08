@@ -144,13 +144,13 @@ export function Admin({ onBack }: Props) {
             </p>
             <h1 className="mt-2 text-2xl font-bold tracking-normal">Services</h1>
             {editingId ? (
-              <p className="mt-1 text-sm text-black/55 dark:text-white/55">
+              <p className="mt-1 text-sm text-black/55 dark:text-[#b8c7c1]">
                 Editing existing app
               </p>
             ) : null}
           </div>
           <button
-            className="h-10 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:text-white"
+            className="h-10 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
             onClick={onBack}
           >
             Dashboard
@@ -173,7 +173,7 @@ export function Admin({ onBack }: Props) {
               />
             </div>
 
-            <div className="grid grid-cols-[120px,1fr] gap-3">
+            <div className="grid gap-3 sm:grid-cols-[120px,minmax(0,1fr)]">
               <div>
                 <label className="label" htmlFor="iconType">
                   Icon
@@ -221,15 +221,15 @@ export function Admin({ onBack }: Props) {
 
             <div>
               <span className="label">Access mode</span>
-              <div className="grid grid-cols-2 gap-2 rounded border border-black/10 bg-[#f1f5f3] p-1 dark:border-white/10 dark:bg-white/5">
+              <div className="grid grid-cols-2 gap-2 rounded border border-black/10 bg-[#f1f5f3] p-1 dark:border-white/15 dark:bg-[#18211e]">
                 {(['subdomain', 'subpath'] as const).map((mode) => (
                   <button
                     key={mode}
                     type="button"
                     className={`h-10 rounded text-sm font-semibold transition ${
                       form.routeMode === mode
-                        ? 'bg-white text-spruce shadow-sm dark:bg-white/12 dark:text-white'
-                        : 'text-black/55 hover:text-black dark:text-white/55 dark:hover:text-white'
+                        ? 'bg-white text-spruce shadow-sm dark:bg-[#24312d] dark:text-[#f4fbf8]'
+                        : 'text-black/55 hover:text-black dark:text-[#b8c7c1] dark:hover:text-[#f4fbf8]'
                     }`}
                     onClick={() => setRouteMode(mode)}
                   >
@@ -252,7 +252,7 @@ export function Admin({ onBack }: Props) {
                 required
               />
               {form.routeMode === 'subdomain' ? (
-                <p className="mt-2 text-xs leading-5 text-black/50 dark:text-white/50">
+                <p className="mt-2 text-xs leading-5 text-black/50 dark:text-[#a9bbb4]">
                   Use app-first names like homebridge.lab.home, and point either
                   that host or *.lab.home to the NaviProxy machine in local DNS.
                 </p>
@@ -280,7 +280,7 @@ export function Admin({ onBack }: Props) {
               </>
             ) : null}
 
-            <label className="flex items-center gap-3 text-sm font-medium text-black/70 dark:text-white/70">
+            <label className="flex items-center gap-3 text-sm font-medium text-black/70 dark:text-[#d7e4df]">
               <input
                 type="checkbox"
                 className="h-4 w-4 accent-spruce"
@@ -297,7 +297,7 @@ export function Admin({ onBack }: Props) {
             </div>
           ) : null}
           {message ? (
-            <div className="mt-4 rounded border border-spruce/25 bg-spruce/10 p-3 text-sm text-spruce dark:text-[#8fe0ce]">
+            <div className="mt-4 rounded border border-spruce/25 bg-spruce/10 p-3 text-sm text-spruce dark:border-[#8fe0ce]/25 dark:bg-[#8fe0ce]/10 dark:text-[#9be8d7]">
               {message}
             </div>
           ) : null}
@@ -313,7 +313,7 @@ export function Admin({ onBack }: Props) {
 
           {editingId ? (
             <button
-              className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded border border-black/10 bg-white px-4 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:text-white"
+              className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded border border-black/10 bg-white px-4 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
               type="button"
               onClick={resetForm}
             >
@@ -322,7 +322,7 @@ export function Admin({ onBack }: Props) {
             </button>
           ) : (
             <button
-              className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded border border-black/10 bg-white px-4 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:text-white"
+              className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded border border-black/10 bg-white px-4 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
               type="button"
               onClick={resetForm}
             >
@@ -336,7 +336,7 @@ export function Admin({ onBack }: Props) {
       <section>
         <div className="mb-5 flex items-center justify-between gap-3">
           <div>
-            <p className="text-sm font-semibold uppercase text-black/45 dark:text-white/45">
+            <p className="text-sm font-semibold uppercase text-black/45 dark:text-[#a9bbb4]">
               Current apps
             </p>
             <h2 className="mt-2 text-2xl font-bold tracking-normal">
@@ -344,7 +344,7 @@ export function Admin({ onBack }: Props) {
             </h2>
           </div>
           <button
-            className="inline-flex h-10 items-center gap-2 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black disabled:opacity-60 dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:text-white"
+            className="inline-flex h-10 items-center gap-2 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black disabled:opacity-60 dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
             onClick={() => void syncProxy()}
             disabled={syncing}
           >
@@ -365,7 +365,7 @@ export function Admin({ onBack }: Props) {
             ))}
           </div>
         ) : (
-          <div className="rounded border border-dashed border-black/20 bg-white p-8 text-center text-sm text-black/55 dark:border-white/15 dark:bg-white/[0.04] dark:text-white/55">
+          <div className="rounded border border-dashed border-black/20 bg-white p-8 text-center text-sm text-black/55 dark:border-white/20 dark:bg-[#141d1a] dark:text-[#b8c7c1]">
             No services have been configured.
           </div>
         )}

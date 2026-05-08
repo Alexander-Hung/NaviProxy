@@ -41,7 +41,7 @@ export function Dashboard({ onOpenAdmin }: Props) {
           <h1 className="mt-2 text-3xl font-bold tracking-normal sm:text-4xl">
             NaviProxy
           </h1>
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-black/60 dark:text-white/60">
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-black/60 dark:text-[#c5d2cd]">
             A focused dashboard for the services already running across your
             homelab.
           </p>
@@ -49,7 +49,7 @@ export function Dashboard({ onOpenAdmin }: Props) {
 
         <div className="flex gap-2">
           <button
-            className="grid h-11 w-11 place-items-center rounded border border-black/10 bg-white text-black/65 transition hover:text-black dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:text-white"
+            className="grid h-11 w-11 place-items-center rounded border border-black/10 bg-white text-black/65 transition hover:text-black dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
             onClick={() => void load()}
             title="Refresh apps"
             aria-label="Refresh apps"
@@ -77,7 +77,7 @@ export function Dashboard({ onOpenAdmin }: Props) {
           {Array.from({ length: 4 }).map((_, index) => (
             <div
               key={index}
-              className="h-[164px] animate-pulse rounded border border-black/10 bg-black/5 dark:border-white/10 dark:bg-white/5"
+              className="h-[164px] animate-pulse rounded border border-black/10 bg-black/5 dark:border-white/15 dark:bg-[#18211e]"
             />
           ))}
         </div>
@@ -88,9 +88,9 @@ export function Dashboard({ onOpenAdmin }: Props) {
           ))}
         </div>
       ) : (
-        <section className="mt-8 rounded border border-dashed border-black/20 bg-white p-8 text-center dark:border-white/15 dark:bg-white/[0.04]">
+        <section className="mt-8 rounded border border-dashed border-black/20 bg-white p-8 text-center dark:border-white/20 dark:bg-[#141d1a]">
           <h2 className="text-lg font-semibold">No apps yet</h2>
-          <p className="mx-auto mt-2 max-w-md text-sm text-black/55 dark:text-white/55">
+          <p className="mx-auto mt-2 max-w-md text-sm text-black/55 dark:text-[#b8c7c1]">
             Add your first service and NaviProxy will prepare both the dashboard
             card and the reverse proxy route.
           </p>
