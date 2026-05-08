@@ -47,12 +47,19 @@ await registerAppsRoutes(app, appsService);
 await registerProxyRoutes(app, proxyService);
 
 const indexPath = path.join(config.webDistPath, 'index.html');
+const faviconPath = path.join(config.webDistPath, 'favicon.ico');
 
 if (fs.existsSync(indexPath)) {
   await app.register(fastifyStatic, {
     root: path.join(config.webDistPath, 'assets'),
     prefix: '/assets/'
   });
+
+  if (fs.existsSync(faviconPath)) {
+    app.get('/favicon.ico', async (_request, reply) => {
+      return reply.type('image/x-icon').send(fs.createReadStream(faviconPath));
+    });
+  }
 
   app.get('/', async (_request, reply) => {
     return reply.type('text/html').send(fs.createReadStream(indexPath));
