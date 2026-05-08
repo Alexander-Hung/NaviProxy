@@ -35,8 +35,14 @@ function App() {
             className="flex items-center gap-3 text-left"
             onClick={() => setPage('dashboard')}
           >
-            <span className="grid h-10 w-10 place-items-center rounded bg-spruce text-sm font-bold text-white">
-              NP
+            <span className="grid h-10 w-10 place-items-center rounded bg-white shadow-sm ring-1 ring-black/10 dark:bg-[#dff3ec] dark:ring-white/15">
+              <img
+                src="/favicon.ico"
+                alt=""
+                className="h-6 w-6"
+                width="24"
+                height="24"
+              />
             </span>
             <span>
               <span className="block text-base font-semibold leading-tight">NaviProxy</span>
