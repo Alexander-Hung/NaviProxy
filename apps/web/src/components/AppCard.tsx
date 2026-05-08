@@ -1,8 +1,9 @@
-import { ExternalLink, Globe2, Route, Trash2 } from 'lucide-react';
+import { ExternalLink, Globe2, Pencil, Route, Trash2 } from 'lucide-react';
 import type { NaviApp } from '../lib/api';
 
 type Props = {
   app: NaviApp;
+  onEdit?: (app: NaviApp) => void;
   onDelete?: (id: string) => void;
 };
 
@@ -31,7 +32,7 @@ function Icon({ app }: { app: NaviApp }) {
   return <Globe2 size={24} />;
 }
 
-export function AppCard({ app, onDelete }: Props) {
+export function AppCard({ app, onEdit, onDelete }: Props) {
   const href = appHref(app);
 
   return (
@@ -40,15 +41,29 @@ export function AppCard({ app, onDelete }: Props) {
         <div className="grid h-12 w-12 shrink-0 place-items-center rounded bg-[#e8f3ef] text-spruce dark:bg-spruce/20 dark:text-[#8fe0ce]">
           <Icon app={app} />
         </div>
-        {onDelete ? (
-          <button
-            className="grid h-9 w-9 place-items-center rounded text-black/40 transition hover:bg-coral/10 hover:text-coral dark:text-white/45"
-            onClick={() => onDelete(app.id)}
-            title="Delete app"
-            aria-label="Delete app"
-          >
-            <Trash2 size={17} />
-          </button>
+        {onEdit || onDelete ? (
+          <div className="flex gap-1">
+            {onEdit ? (
+              <button
+                className="grid h-9 w-9 place-items-center rounded text-black/40 transition hover:bg-spruce/10 hover:text-spruce dark:text-white/45 dark:hover:text-[#8fe0ce]"
+                onClick={() => onEdit(app)}
+                title="Edit app"
+                aria-label="Edit app"
+              >
+                <Pencil size={17} />
+              </button>
+            ) : null}
+            {onDelete ? (
+              <button
+                className="grid h-9 w-9 place-items-center rounded text-black/40 transition hover:bg-coral/10 hover:text-coral dark:text-white/45"
+                onClick={() => onDelete(app.id)}
+                title="Delete app"
+                aria-label="Delete app"
+              >
+                <Trash2 size={17} />
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

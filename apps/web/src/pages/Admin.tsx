@@ -1,4 +1,4 @@
-import { RefreshCw, Save } from 'lucide-react';
+import { Plus, RefreshCw, Save, X } from 'lucide-react';
 import { FormEvent, useEffect, useState } from 'react';
 import { AppCard } from '../components/AppCard';
 import { RouteModeWarning } from '../components/RouteModeWarning';
@@ -23,6 +23,7 @@ const initialForm: AppPayload = {
 export function Admin({ onBack }: Props) {
   const [apps, setApps] = useState<NaviApp[]>([]);
   const [form, setForm] = useState<AppPayload>(initialForm);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -51,6 +52,31 @@ export function Admin({ onBack }: Props) {
     }));
   }
 
+  function resetForm() {
+    setEditingId(null);
+    setForm(initialForm);
+    setError(null);
+    setMessage(null);
+  }
+
+  function editApp(app: NaviApp) {
+    setEditingId(app.id);
+    setForm({
+      name: app.name,
+      iconType: app.iconType,
+      iconValue: app.iconValue,
+      targetUrl: app.targetUrl,
+      routeMode: app.routeMode,
+      publicHost: app.publicHost,
+      publicPath: app.publicPath,
+      enabled: app.enabled,
+      sortOrder: app.sortOrder
+    });
+    setError(null);
+    setMessage(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
   async function submit(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -58,8 +84,15 @@ export function Admin({ onBack }: Props) {
     setMessage(null);
 
     try {
-      await api.createApp(form);
-      setMessage('App saved and proxy configuration queued.');
+      if (editingId) {
+        await api.updateApp(editingId, form);
+        setMessage('App updated and proxy configuration queued.');
+      } else {
+        await api.createApp(form);
+        setMessage('App saved and proxy configuration queued.');
+      }
+
+      setEditingId(null);
       setForm(initialForm);
       await load();
     } catch (err) {
@@ -110,6 +143,11 @@ export function Admin({ onBack }: Props) {
               Admin
             </p>
             <h1 className="mt-2 text-2xl font-bold tracking-normal">Services</h1>
+            {editingId ? (
+              <p className="mt-1 text-sm text-black/55 dark:text-white/55">
+                Editing existing app
+              </p>
+            ) : null}
           </div>
           <button
             className="h-10 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:text-white"
@@ -270,8 +308,28 @@ export function Admin({ onBack }: Props) {
             disabled={saving}
           >
             <Save size={18} />
-            {saving ? 'Saving...' : 'Save app'}
+            {saving ? 'Saving...' : editingId ? 'Update app' : 'Save app'}
           </button>
+
+          {editingId ? (
+            <button
+              className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded border border-black/10 bg-white px-4 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:text-white"
+              type="button"
+              onClick={resetForm}
+            >
+              <X size={18} />
+              Cancel editing
+            </button>
+          ) : (
+            <button
+              className="mt-3 inline-flex h-11 w-full items-center justify-center gap-2 rounded border border-black/10 bg-white px-4 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/10 dark:bg-white/5 dark:text-white/65 dark:hover:text-white"
+              type="button"
+              onClick={resetForm}
+            >
+              <Plus size={18} />
+              New app
+            </button>
+          )}
         </form>
       </section>
 
@@ -298,7 +356,12 @@ export function Admin({ onBack }: Props) {
         {apps.length > 0 ? (
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {apps.map((app) => (
-              <AppCard key={app.id} app={app} onDelete={deleteApp} />
+              <AppCard
+                key={app.id}
+                app={app}
+                onEdit={editApp}
+                onDelete={deleteApp}
+              />
             ))}
           </div>
         ) : (

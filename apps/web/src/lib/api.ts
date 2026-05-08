@@ -56,6 +56,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
+  updateApp: (id: string, payload: AppPayload) =>
+    request<NaviApp>(`/api/apps/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
   deleteApp: (id: string) =>
     request<{ ok: true }>(`/api/apps/${id}`, {
       method: 'DELETE'
