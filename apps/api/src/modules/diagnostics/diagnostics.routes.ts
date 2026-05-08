@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import dns from 'node:dns/promises';
+import http from 'node:http';
 import os from 'node:os';
 import { promisify } from 'node:util';
 import type { FastifyInstance } from 'fastify';
@@ -167,18 +168,116 @@ async function scanWithSs() {
   return services;
 }
 
-async function scanLocalServices() {
-  let services: LocalService[];
+function dockerSocketPaths(): string[] {
+  const paths = ['/var/run/docker.sock'];
 
-  try {
-    services = await scanWithLsof();
-  } catch {
-    services = await scanWithSs();
+  if (os.platform() === 'darwin') {
+    paths.push(`${os.homedir()}/.docker/run/docker.sock`);
   }
+
+  return paths;
+}
+
+async function fetchDockerJson(socketPath: string, apiPath: string): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { socketPath, path: apiPath, method: 'GET', headers: { Host: 'localhost' } },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk: Buffer) => { data += chunk.toString(); });
+        res.on('end', () => {
+          try {
+            if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+              resolve(JSON.parse(data));
+            } else {
+              reject(new Error(`Docker API ${res.statusCode}`));
+            }
+          } catch (err) {
+            reject(err);
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.setTimeout(3000, () => req.destroy(new Error('Docker socket timeout')));
+    req.end();
+  });
+}
+
+type DockerPort = { IP: string; PrivatePort: number; PublicPort?: number; Type: string };
+type DockerContainer = { Names: string[]; Ports: DockerPort[]; State: string };
+
+async function scanWithDocker(): Promise<LocalService[]> {
+  for (const socketPath of dockerSocketPaths()) {
+    try {
+      const containers = await fetchDockerJson(socketPath, '/containers/json') as DockerContainer[];
+      const services: LocalService[] = [];
+
+      for (const container of containers) {
+        if (container.State !== 'running') {
+          continue;
+        }
+
+        const name = (container.Names?.[0] ?? '').replace(/^\//, '');
+
+        for (const port of container.Ports ?? []) {
+          if (port.Type !== 'tcp' || !port.PublicPort) {
+            continue;
+          }
+
+          const address = port.IP === '' ? '0.0.0.0' : port.IP;
+
+          services.push({
+            address,
+            port: port.PublicPort,
+            pid: null,
+            processName: name,
+            targetUrl: targetUrl(address, port.PublicPort)
+          });
+        }
+      }
+
+      return services;
+    } catch {
+      // try next socket path
+    }
+  }
+
+  return [];
+}
+
+async function scanLocalServices() {
+  const [systemServices, dockerServices] = await Promise.all([
+    (async () => {
+      try {
+        return await scanWithLsof();
+      } catch {
+        return await scanWithSs();
+      }
+    })(),
+    scanWithDocker()
+  ]);
+
+  // Docker container names are more useful than "docker-proxy" — replace where ports match
+  const dockerByPort = new Map<number, string>();
+  for (const service of dockerServices) {
+    if (!dockerByPort.has(service.port)) {
+      dockerByPort.set(service.port, service.processName ?? '');
+    }
+  }
+
+  const enhanced = systemServices.map((service) => {
+    const containerName = dockerByPort.get(service.port);
+    return containerName ? { ...service, processName: containerName } : service;
+  });
+
+  // Add Docker services that the system scan missed (userland-proxy disabled)
+  const systemPorts = new Set(systemServices.map((s) => s.port));
+  const dockerOnly = dockerServices.filter((s) => !systemPorts.has(s.port));
 
   const unique = new Map<string, LocalService>();
 
-  for (const service of services) {
+  for (const service of [...enhanced, ...dockerOnly]) {
     unique.set(serviceKey(service), service);
   }
 

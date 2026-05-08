@@ -909,7 +909,7 @@ export function Admin({ onBack }: Props) {
       </section>
 
       <section>
-        <div className="mb-5 flex items-center justify-between gap-3">
+        <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold uppercase text-black/45 dark:text-[#a9bbb4]">
               Current apps
@@ -918,7 +918,7 @@ export function Admin({ onBack }: Props) {
               {apps.length} configured
             </h2>
           </div>
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap gap-2 sm:justify-end">
             <button
               className="inline-flex h-10 items-center gap-2 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black disabled:opacity-60 dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
               onClick={() => void exportApps()}

@@ -67,7 +67,7 @@ export function AppCard({
           <Icon app={app} />
         </div>
         {onEdit || onDelete || onDetails || onMoveUp || onMoveDown ? (
-          <div className="flex gap-1">
+          <div className="flex flex-wrap justify-end gap-1">
             {onMoveUp ? (
               <button
                 className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-spruce/10 hover:text-spruce dark:text-[#a9bbb4] dark:hover:bg-[#8fe0ce]/10 dark:hover:text-[#9be8d7]"
