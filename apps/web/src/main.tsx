@@ -37,7 +37,7 @@ function App() {
           >
             <span className="grid h-10 w-10 place-items-center rounded bg-white shadow-sm ring-1 ring-black/10 dark:bg-[#dff3ec] dark:ring-white/15">
               <img
-                src="/favicon.ico"
+                src="https://assets.alexander-hung.com/base/icon.svg"
                 alt=""
                 className="h-6 w-6"
                 width="24"
