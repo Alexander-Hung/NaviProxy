@@ -30,6 +30,64 @@ const settingsService = new SettingsService(db);
 const proxyService = new ProxyService(db, appsRepo, settingsService);
 const appsService = new AppsService(db, proxyService);
 
+function scheduleStartupProxySync(attempt = 1) {
+  const maxAttempts = 12;
+  const retryDelayMs = 5_000;
+
+  void proxyService.syncSafely().then((result) => {
+    if (result.status === 'success' || result.status === 'skipped') {
+      auditService.record({
+        action: 'proxy.startup_sync',
+        targetType: 'proxy',
+        summary:
+          result.status === 'success'
+            ? `Startup proxy sync succeeded on attempt ${attempt}`
+            : 'Startup proxy sync skipped because Caddy sync is disabled'
+      });
+      app.log.info(
+        {
+          status: result.status,
+          attempt
+        },
+        'Startup proxy sync completed'
+      );
+      return;
+    }
+
+    auditService.record({
+      action: 'proxy.startup_sync_failed',
+      targetType: 'proxy',
+      summary: `Attempt ${attempt} failed: ${result.errorMessage ?? 'Unknown error'}`
+    });
+
+    if (attempt >= maxAttempts) {
+      app.log.error(
+        {
+          attempt,
+          errorMessage: result.errorMessage
+        },
+        'Startup proxy sync failed after all attempts'
+      );
+      return;
+    }
+
+    app.log.warn(
+      {
+        attempt,
+        nextAttempt: attempt + 1,
+        errorMessage: result.errorMessage
+      },
+      'Startup proxy sync failed; retrying'
+    );
+
+    const timer = setTimeout(
+      () => scheduleStartupProxySync(attempt + 1),
+      retryDelayMs
+    );
+    timer.unref?.();
+  });
+}
+
 app.addContentTypeParser(
   'application/json',
   { parseAs: 'string' },
@@ -98,3 +156,5 @@ await app.listen({
   host: config.host,
   port: config.port
 });
+
+scheduleStartupProxySync();

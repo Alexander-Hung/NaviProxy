@@ -1,7 +1,7 @@
 [Unit]
 Description=NaviProxy dashboard and reverse proxy controller
-After=network-online.target
-Wants=network-online.target
+After=network-online.target caddy.service
+Wants=network-online.target caddy.service
 
 [Service]
 Type=simple

@@ -22,6 +22,7 @@ Enable boot autostart:
 ```
 
 That writes `/etc/systemd/system/naviproxy.service`, creates the `naviproxy` system user when needed, enables the service, and starts it immediately.
+The service is ordered after `caddy.service`, and NaviProxy also syncs the saved SQLite app routes back into Caddy on startup with retries.
 
 ## Manual Install
 
