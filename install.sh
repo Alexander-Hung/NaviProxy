@@ -133,9 +133,6 @@ main() {
 
   log "Install complete."
   log "Start with: ./start.sh"
-  log "Enable autostart with: ./enable-autostart.sh"
-  log "Repair Caddy routing with: ./repair-caddy.sh"
-  log "Diagnose service issues with: ./doctor.sh"
 }
 
 main "$@"

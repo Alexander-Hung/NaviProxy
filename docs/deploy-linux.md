@@ -15,15 +15,6 @@ cd /opt/naviproxy
 
 `start.sh` loads `/etc/naviproxy/naviproxy.env`, verifies build output, starts Caddy if systemd is available, and starts NaviProxy.
 
-Enable boot autostart:
-
-```bash
-./enable-autostart.sh
-```
-
-That writes `/etc/systemd/system/naviproxy.service`, creates the `naviproxy` system user when needed, enables the service, and starts it immediately.
-The service is ordered after `caddy.service`, and NaviProxy also syncs the saved SQLite app routes back into Caddy on startup with retries.
-
 ## Manual Install
 
 ## 1. Install runtime dependencies
@@ -102,29 +93,22 @@ Then reload Caddy:
 sudo systemctl reload caddy
 ```
 
-If port 80 still shows an old Caddy placeholder page, run:
-
-```bash
-./repair-caddy.sh
-```
-
-If Caddy returns `502`, run:
-
-```bash
-./repair-caddy.sh
-./doctor.sh
-```
-
 ## 5. Run as a systemd service
 
 ```bash
-./enable-autostart.sh
+sudo cp deploy/naviproxy.service /etc/systemd/system/naviproxy.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now naviproxy.service
 ```
+
+The service is ordered after `caddy.service`, and NaviProxy also syncs the saved
+SQLite app routes back into Caddy on startup with retries.
 
 Check status:
 
 ```bash
 systemctl status naviproxy
+systemctl status caddy
 curl http://127.0.0.1:3001/api/health
 ```
 

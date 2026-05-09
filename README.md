@@ -30,24 +30,6 @@ One-click install and start after cloning the repo:
 ./start.sh
 ```
 
-Enable boot autostart:
-
-```bash
-./enable-autostart.sh
-```
-
-Repair Caddy port 80 routing if Caddy still shows an old placeholder page:
-
-```bash
-./repair-caddy.sh
-```
-
-Diagnose port 80 / 502 issues:
-
-```bash
-./doctor.sh
-```
-
 Manual production build:
 
 ```bash
