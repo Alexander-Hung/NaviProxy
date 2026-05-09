@@ -387,13 +387,19 @@ export class AppsService {
             error: null
           };
         } catch (error) {
+          const cause =
+            error instanceof Error && error.cause instanceof Error
+              ? error.cause
+              : null;
+          const message = cause?.message ?? (error instanceof Error ? error.message : String(error));
+
           return {
             id: app.id,
             ok: false,
             statusCode: null,
             responseTimeMs: Date.now() - startedAt,
             checkedAt,
-            error: error instanceof Error ? error.message : String(error)
+            error: message
           };
         }
       })
