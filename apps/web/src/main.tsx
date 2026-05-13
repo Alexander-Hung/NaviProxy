@@ -40,6 +40,11 @@ function App() {
     setOpenDeploySignal((current) => current + 1);
   }
 
+  function openAdmin() {
+    setOpenDeploySignal(0);
+    setPage('admin');
+  }
+
   return (
     <div className="min-h-screen bg-[#f7faf9] text-ink transition-colors dark:bg-[#0f1714] dark:text-[#edf5f2]">
       <header className="sticky top-0 z-20 border-b border-black/10 bg-white/90 backdrop-blur dark:border-white/15 dark:bg-[#0f1714]/95">
@@ -79,7 +84,14 @@ function App() {
                         ? 'bg-white text-spruce shadow-sm dark:bg-[#24312d] dark:text-[#f4fbf8]'
                         : 'text-black/60 hover:text-black dark:text-[#b8c7c1] dark:hover:text-[#f4fbf8]'
                     }`}
-                    onClick={() => setPage(tab.id)}
+                    onClick={() => {
+                      if (tab.id === 'admin') {
+                        openAdmin();
+                        return;
+                      }
+
+                      setPage(tab.id);
+                    }}
                   >
                     <Icon size={16} />
                     {tab.label}
@@ -101,7 +113,7 @@ function App() {
 
       <main className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
         {page === 'dashboard' ? (
-          <Dashboard onOpenAdmin={() => setPage('admin')} />
+          <Dashboard onOpenAdmin={openAdmin} />
         ) : (
           <Admin
             onBack={() => setPage('dashboard')}
@@ -124,7 +136,14 @@ function App() {
                     ? 'bg-spruce text-white dark:bg-[#8fe0ce] dark:text-[#0f1714]'
                     : 'bg-transparent text-black/65 dark:text-[#b8c7c1]'
                 }`}
-                onClick={() => setPage(tab.id)}
+                onClick={() => {
+                  if (tab.id === 'admin') {
+                    openAdmin();
+                    return;
+                  }
+
+                  setPage(tab.id);
+                }}
               >
                 <Icon size={17} />
                 {tab.label}
