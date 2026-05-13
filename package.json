@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "description": "A lightweight dashboard and reverse proxy gateway for homelabs.",
+  "license": "MIT",
+  "author": "Alexander-Hung",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alexander-Hung/NaviProxy.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Alexander-Hung/NaviProxy/issues"
+  },
+  "homepage": "https://github.com/Alexander-Hung/NaviProxy#readme",
   "workspaces": [
     "apps/*"
   ],

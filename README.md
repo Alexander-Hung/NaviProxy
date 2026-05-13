@@ -1,13 +1,41 @@
 # NaviProxy
 
-NaviProxy is a lightweight homelab dashboard and reverse proxy gateway. It keeps the target services independent: Docker, bare metal, NAS apps, Raspberry Pi services, and anything else are treated as plain `IP:Port` upstreams.
+NaviProxy is a lightweight homelab dashboard, reverse proxy controller, and self-host deployment manager. It gives users one place to register existing services, deploy Docker-based apps, assign ports, bind routes, check health, and keep Caddy reverse proxy configuration in sync.
+
+The project is designed for mini PCs, NAS boxes, Raspberry Pi hosts, home servers, and small cloud machines. It treats services as plain HTTP upstreams, so Docker, Docker Compose, bare-metal processes, NAS apps, and LAN devices can all appear in the same dashboard.
+
+## Current Status
+
+Available now:
+
+- App dashboard with categories, tags, favorites, ordering, and health status.
+- Admin panel for app CRUD, import/export, backup/restore, settings, audits, diagnostics, and proxy sync.
+- Caddy Admin API integration for generated reverse proxy configuration.
+- Subdomain and subpath routing modes. Subdomain mode is recommended.
+- Local service discovery for ports already listening on the NaviProxy host.
+- DNS diagnostics for route and public domain checks.
+- Docker run deployments with command parsing, automatic port assignment, permission checks, and managed cleanup.
+- Docker Compose deployments with YAML parsing, web service selection, port inference, bind mount checks, host network handling, and managed cleanup.
+- Host permission panel for Docker CLI, Docker daemon, Compose runtime, bind mounts, privileged containers, capabilities, devices, host networking, Docker socket mounts, public domain DNS, and Caddy sync.
+- Managed deployment records. Apps deployed by NaviProxy are marked as managed and are cleaned up when deleted.
+
+Planned:
+
+- GitHub auto-detect deployments.
+- Static site deployments.
+- Node.js app deployments.
+- Python app deployments.
+- Binary or service deployments.
+- Advanced custom command deployments.
+- Multi-host or agent-based management.
 
 ## Stack
 
 - Web: React, Vite, TailwindCSS
 - API: Node.js, Fastify
 - Database: SQLite
-- Proxy engine: Caddy Admin API
+- Reverse proxy: Caddy Admin API
+- Deploy runtime: Docker CLI and Docker Compose
 
 ## Development
 
@@ -16,21 +44,12 @@ npm install
 npm run dev
 ```
 
-The web app runs at `http://localhost:5173`.
-The API runs at `http://localhost:3001`.
+Default development URLs:
 
-## Linux Deployment
+- Web: `http://localhost:5173`
+- API: `http://localhost:3001`
 
-See [docs/deploy-linux.md](docs/deploy-linux.md) for the mini PC deployment path using Node.js, SQLite, Caddy, and systemd.
-
-One-click install and start after cloning the repo:
-
-```bash
-./install.sh
-./start.sh
-```
-
-Manual production build:
+## Production Build
 
 ```bash
 npm ci
@@ -39,32 +58,105 @@ npm start
 ```
 
 The production API serves both `/api/*` and the built web dashboard.
-With Caddy enabled, open NaviProxy at `http://<MINI_PC_IP>` without a port. Caddy listens on port `80` and forwards dashboard traffic to the API service on `3001`.
 
-By default, Caddy sync is disabled for local development. To enable live Caddy updates:
+## Linux Deployment
+
+See [docs/deploy-linux.md](docs/deploy-linux.md) for the Debian/Ubuntu mini PC deployment path using Node.js, SQLite, Caddy, and systemd.
+
+Fast path after cloning the repository:
 
 ```bash
-CADDY_SYNC_ENABLED=true CADDY_ADMIN_URL=http://127.0.0.1:2019 npm run dev -w @naviproxy/api
+./install.sh
+./start.sh
 ```
 
-Optional hardening:
+## Environment
 
-```bash
-ADMIN_TOKEN='choose-a-long-token'
+Common production variables:
+
+```env
+HOST=0.0.0.0
+PORT=3001
+ADMIN_TOKEN=
 DASHBOARD_AUTH_REQUIRED=false
-CORS_ORIGIN='http://naviproxy.lab.home'
+CORS_ORIGIN=
+DATABASE_PATH=/opt/naviproxy/data/naviproxy.sqlite
+WEB_DIST_PATH=/opt/naviproxy/apps/web/dist
+CADDY_ADMIN_URL=http://127.0.0.1:2019
+CADDY_SYNC_ENABLED=true
+CADDY_LISTEN=:80
+DOCKER_BIN=docker
+DEPLOYMENTS_PATH=/opt/naviproxy/data/deployments
+HEALTH_CHECK_INTERVAL_SECONDS=0
+NAVIPROXY_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
 ```
 
-When `ADMIN_TOKEN` is set, the dashboard can still be viewed without a token unless `DASHBOARD_AUTH_REQUIRED=true` is set or enabled in settings. Admin actions require the token in the Admin page; the web UI keeps the token in tab-scoped session storage instead of long-lived local storage. The Admin page also includes categories, tags, favorites, health history, local listening port discovery, DNS diagnostics, TLS mode settings, sync history, full backup/restore, JSON import/export, and manual app ordering.
+For production, set a strong `ADMIN_TOKEN`. Set `DASHBOARD_AUTH_REQUIRED=true` if the read-only dashboard should also require authentication.
 
-## First MVP Behavior
+## Deployments
 
-- Add apps from the admin panel.
-- LAN target URLs should be origins such as `http://192.168.1.20:8096`; paths,
-  queries, and hashes are rejected so the rendered Caddy upstream is explicit.
-- Subdomain mode is the recommended path, for example `jellyfin.lab.home`.
-- Subdomains are app-first: use `homebridge.lab.home`, not `lab.home.homebridge`.
-- Local DNS must resolve each app host to the NaviProxy machine, either with records like `homebridge.lab.home -> <MINI_PC_IP>` or a wildcard record like `*.lab.home -> <MINI_PC_IP>`.
-- Subpath mode is available, but the UI warns that it may break static assets, redirects, cookies, WebSockets, or OAuth callbacks.
-- Enabled apps are written to SQLite.
-- When Caddy sync is enabled, NaviProxy renders a Caddy JSON config and posts it to `/load`.
+NaviProxy can deploy from:
+
+- `docker run` commands
+- Docker Compose YAML
+
+The deploy flow is:
+
+1. Paste a command or Compose file.
+2. NaviProxy auto-fills app name, route host, and ports when possible.
+3. Review Host permission checks.
+4. Preview the deployment plan.
+5. Deploy.
+6. NaviProxy creates the app route and saves a managed deployment record.
+
+When a managed app is deleted, NaviProxy attempts to remove the related Docker container or Compose project and free the route.
+
+## Important Safety Model
+
+NaviProxy automates common deployment work, but it does not bypass operating system permissions.
+
+It can automatically:
+
+- Allocate safe high ports.
+- Create normal writable bind mount paths.
+- Write managed Compose files.
+- Call Docker and Docker Compose.
+- Sync Caddy routes.
+- Remove managed containers or Compose projects.
+
+It will not silently:
+
+- Run `sudo`.
+- Change Docker socket permissions.
+- Modify router port forwarding.
+- Change public DNS records.
+- Expose Caddy Admin API to the public internet.
+- Override protected host paths without user action.
+
+Host permission checks are shown before deploy so users can see what is ready, what NaviProxy can handle, and what needs manual host authorization.
+
+## Testing
+
+```bash
+npm test
+npm run lint
+npm run typecheck
+npm run build
+npm run test:e2e
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and pull request guidelines.
+
+Security reports should follow [SECURITY.md](SECURITY.md).
+
+Release preparation is documented in [RELEASE.md](RELEASE.md), and user-facing changes are tracked in [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+NaviProxy is released under the [MIT License](LICENSE).
+
+## Notes for Maintainers
+
+Public repository content should be written in English. Local personal planning notes under `docs/*.md` are ignored by git, except for `docs/deploy-linux.md`, which is the public Linux deployment guide.
