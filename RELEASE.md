@@ -14,13 +14,21 @@ During `0.x`, breaking changes may happen, but they must be documented in `CHANG
 
 ## Release Checklist
 
-1. Confirm the working tree only contains intended changes.
+1. Create or update the release branch from `develop`.
+
+   ```bash
+   git checkout develop
+   git pull
+   git checkout -B release/vX.Y
+   ```
+
+2. Confirm the working tree only contains intended changes.
 
    ```bash
    git status --short
    ```
 
-2. Run the full validation suite.
+3. Run the full validation suite.
 
    ```bash
    npm test
@@ -30,18 +38,18 @@ During `0.x`, breaking changes may happen, but they must be documented in `CHANG
    npm run test:e2e
    ```
 
-3. Review generated or ignored files.
+4. Review generated or ignored files.
 
    ```bash
    git diff --check
    git status --short --ignored
    ```
 
-4. Update `CHANGELOG.md`.
+5. Update `CHANGELOG.md`.
 
    Move relevant entries from `[Unreleased]` into the release version section.
 
-5. Update package versions.
+6. Update package versions.
 
    ```bash
    npm version minor --workspaces --include-workspace-root --no-git-tag-version
@@ -50,21 +58,36 @@ During `0.x`, breaking changes may happen, but they must be documented in `CHANG
 
    Use `patch`, `minor`, or `major` when appropriate.
 
-6. Commit the release.
+7. Commit the release.
 
    ```bash
    git add -A
    git commit -m "Release vX.Y.Z"
    ```
 
-7. Tag the release.
+8. Merge the release branch into `main`.
+
+   ```bash
+   git checkout main
+   git merge --no-ff release/vX.Y
+   ```
+
+9. Tag the release from `main`.
 
    ```bash
    git tag vX.Y.Z
    git push origin main --tags
    ```
 
-8. Create a GitHub release.
+10. Merge `main` back into `develop`.
+
+   ```bash
+   git checkout develop
+   git merge --no-ff main
+   git push origin develop
+   ```
+
+11. Create a GitHub release.
 
    Include:
 
