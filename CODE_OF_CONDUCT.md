@@ -2,7 +2,7 @@
 
 ## Our Pledge
 
-We pledge to make participation in NaviProxy a respectful and constructive experience for everyone.
+We pledge to make participation in The Containers a respectful and constructive experience for everyone.
 
 ## Expected Behavior
 
@@ -26,4 +26,4 @@ Maintainers may remove comments, close issues, reject contributions, or block us
 
 ## Scope
 
-This code applies to the repository, issues, pull requests, discussions, release channels, and any official NaviProxy community spaces.
+This code applies to the repository, issues, pull requests, discussions, release channels, and any official The Containers community spaces.

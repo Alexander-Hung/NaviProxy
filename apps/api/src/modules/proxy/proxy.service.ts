@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import net from 'node:net';
 import { nanoid } from 'nanoid';
-import type { NaviDatabase } from '../../db/database.js';
+import type { ContainersDatabase } from '../../db/database.js';
 import { config } from '../../config.js';
 import type { AppsRepo } from '../apps/apps.repo.js';
 import { buildCaddyConfig } from './caddy.builder.js';
@@ -12,7 +12,7 @@ export class ProxyService {
   private readonly caddy = new CaddyClient(config.caddyAdminUrl);
 
   constructor(
-    private readonly db: NaviDatabase,
+    private readonly db: ContainersDatabase,
     private readonly appsRepo: AppsRepo,
     private readonly settingsService: SettingsService
   ) {}

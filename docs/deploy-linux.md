@@ -1,19 +1,19 @@
-# Deploy NaviProxy on a Linux Mini PC
+# Deploy The Containers on a Linux Mini PC
 
 This guide assumes Debian or Ubuntu. Adjust package commands for other distributions.
 
 ## Fast Path
 
 ```bash
-git clone https://github.com/Alexander-Hung/NaviProxy /opt/naviproxy
-cd /opt/naviproxy
+git clone https://github.com/Alexander-Hung/the-containers /opt/the-containers
+cd /opt/the-containers
 ./install.sh
 ./start.sh
 ```
 
-`install.sh` installs system packages on Debian/Ubuntu, installs Node.js 22 when needed, installs Caddy when missing, runs `npm ci`, builds the app, prepares `/etc/naviproxy/naviproxy.env`, and reloads Caddy. If `apt` cannot locate `caddy`, the script adds Caddy's official apt repository and retries.
+`install.sh` installs system packages on Debian/Ubuntu, installs Node.js 22 when needed, installs Caddy when missing, runs `npm ci`, builds the app, prepares `/etc/the-containers/the-containers.env`, and reloads Caddy. If `apt` cannot locate `caddy`, the script adds Caddy's official apt repository and retries.
 
-`start.sh` loads `/etc/naviproxy/naviproxy.env`, verifies build output, starts Caddy if systemd is available, and starts NaviProxy.
+`start.sh` loads `/etc/the-containers/the-containers.env`, verifies build output, starts Caddy if systemd is available, and starts The Containers.
 
 ## Manual Install
 
@@ -31,24 +31,24 @@ sudo apt install -y nodejs
 ## 2. Download and build
 
 ```bash
-sudo mkdir -p /opt/naviproxy
-sudo chown "$USER":"$USER" /opt/naviproxy
-git clone https://github.com/Alexander-Hung/NaviProxy /opt/naviproxy
-cd /opt/naviproxy
+sudo mkdir -p /opt/the-containers
+sudo chown "$USER":"$USER" /opt/the-containers
+git clone https://github.com/Alexander-Hung/the-containers /opt/the-containers
+cd /opt/the-containers
 npm ci
 npm run build
 ```
 
-## 3. Configure NaviProxy
+## 3. Configure The Containers
 
 ```bash
-sudo useradd --system --home /opt/naviproxy --shell /usr/sbin/nologin naviproxy
-sudo mkdir -p /etc/naviproxy /opt/naviproxy/data
-sudo cp .env.example /etc/naviproxy/naviproxy.env
-sudo chown -R naviproxy:naviproxy /opt/naviproxy/data
+sudo useradd --system --home /opt/the-containers --shell /usr/sbin/nologin the-containers
+sudo mkdir -p /etc/the-containers /opt/the-containers/data
+sudo cp .env.example /etc/the-containers/the-containers.env
+sudo chown -R the-containers:the-containers /opt/the-containers/data
 ```
 
-Edit `/etc/naviproxy/naviproxy.env`:
+Edit `/etc/the-containers/the-containers.env`:
 
 ```env
 HOST=0.0.0.0
@@ -56,12 +56,12 @@ PORT=3001
 ADMIN_TOKEN=
 DASHBOARD_AUTH_REQUIRED=false
 CORS_ORIGIN=
-DATABASE_PATH=/opt/naviproxy/data/naviproxy.sqlite
-WEB_DIST_PATH=/opt/naviproxy/apps/web/dist
+DATABASE_PATH=/opt/the-containers/data/the-containers.sqlite
+WEB_DIST_PATH=/opt/the-containers/apps/web/dist
 CADDY_ADMIN_URL=http://127.0.0.1:2019
 CADDY_SYNC_ENABLED=true
 CADDY_LISTEN=:80
-NAVIPROXY_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
+THE_CONTAINERS_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
 ```
 
 Set `ADMIN_TOKEN` to require a token before anyone can create, edit, delete,
@@ -96,18 +96,18 @@ sudo systemctl reload caddy
 ## 5. Run as a systemd service
 
 ```bash
-sudo cp deploy/naviproxy.service /etc/systemd/system/naviproxy.service
+sudo cp deploy/the-containers.service /etc/systemd/system/the-containers.service
 sudo systemctl daemon-reload
-sudo systemctl enable --now naviproxy.service
+sudo systemctl enable --now the-containers.service
 ```
 
-The service is ordered after `caddy.service`, and NaviProxy also syncs the saved
+The service is ordered after `caddy.service`, and The Containers also syncs the saved
 SQLite app routes back into Caddy on startup with retries.
 
 Check status:
 
 ```bash
-systemctl status naviproxy
+systemctl status the-containers
 systemctl status caddy
 curl http://127.0.0.1:3001/api/health
 ```
@@ -118,7 +118,7 @@ Open:
 http://<MINI_PC_IP>
 ```
 
-Caddy listens on port `80` and forwards NaviProxy dashboard traffic to the Node service on `3001`, so you do not need to type a port in the browser.
+Caddy listens on port `80` and forwards The Containers dashboard traffic to the Node service on `3001`, so you do not need to type a port in the browser.
 
 After adding a subdomain app such as `jellyfin.lab.home`, point that name to the mini PC IP in your router DNS, Pi-hole, AdGuard Home, or local DNS server.
 
@@ -152,8 +152,8 @@ or a wildcard record:
 - Use LAN target URL origins like `http://192.168.1.20:8096`, without path,
   query, or hash components.
 - Use the Admin page local service scan to discover software already listening
-  on the NaviProxy host and prefill app targets from those ports.
+  on the host running The Containers and prefill app targets from those ports.
 - Keep Caddy Admin API bound to `127.0.0.1`.
-- If you use port `80` for proxied apps, keep NaviProxy itself on `3001`.
-- Back up `/opt/naviproxy/data/naviproxy.sqlite`, or use the admin UI export
+- If you use port `80` for proxied apps, keep The Containers itself on `3001`.
+- Back up `/opt/the-containers/data/the-containers.sqlite`, or use the admin UI export
   button to save a JSON copy of configured apps.

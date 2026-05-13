@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in NaviProxy.
+description: Report a reproducible problem in The Containers.
 title: "[Bug]: "
 labels:
   - bug
@@ -11,7 +11,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: NaviProxy version or commit
+      label: The Containers version or commit
       placeholder: v0.1.0 or commit SHA
     validations:
       required: true

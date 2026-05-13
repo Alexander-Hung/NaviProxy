@@ -1,6 +1,6 @@
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
-import type { NaviDatabase } from '../../db/database.js';
+import type { ContainersDatabase } from '../../db/database.js';
 import type { ProxyService } from '../proxy/proxy.service.js';
 import type { SettingsService } from '../settings/settings.service.js';
 import { AppsRepo } from './apps.repo.js';
@@ -199,7 +199,7 @@ export class AppsService {
   private readonly repo: AppsRepo;
 
   constructor(
-    private readonly db: NaviDatabase,
+    private readonly db: ContainersDatabase,
     private readonly proxyService: ProxyService
   ) {
     this.repo = new AppsRepo(db);

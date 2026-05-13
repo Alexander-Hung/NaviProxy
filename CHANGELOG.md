@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to NaviProxy will be documented in this file.
+All notable changes to The Containers will be documented in this file.
 
 This project follows [Semantic Versioning](https://semver.org/) while it is public-facing. During `0.x`, breaking changes may still happen, but they should be documented clearly in release notes.
 
@@ -16,7 +16,7 @@ This project follows [Semantic Versioning](https://semver.org/) while it is publ
 
 ### Changed
 
-- README now describes NaviProxy as a dashboard, reverse proxy controller, and self-host deployment manager.
+- README now describes The Containers as a dashboard, reverse proxy controller, and self-host deployment manager.
 
 ## [0.1.0] - 2026-05-13
 

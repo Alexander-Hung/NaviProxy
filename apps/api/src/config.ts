@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 
 function parseCorsOrigin(value: string | undefined) {
@@ -17,6 +18,15 @@ function parseCorsOrigin(value: string | undefined) {
   return origins.length === 1 ? origins[0] : origins;
 }
 
+function defaultDatabasePath() {
+  const dataDir = path.resolve(process.cwd(), '../../data');
+  const legacyPath = path.join(dataDir, 'naviproxy.sqlite');
+
+  return existsSync(legacyPath)
+    ? legacyPath
+    : path.join(dataDir, 'the-containers.sqlite');
+}
+
 export const config = {
   host: process.env.HOST ?? '0.0.0.0',
   port: Number(process.env.PORT ?? 3001),
@@ -25,7 +35,7 @@ export const config = {
   corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
   databasePath:
     process.env.DATABASE_PATH ??
-    path.resolve(process.cwd(), '../../data/naviproxy.sqlite'),
+    defaultDatabasePath(),
   webDistPath:
     process.env.WEB_DIST_PATH ??
     path.resolve(process.cwd(), '../web/dist'),
@@ -38,6 +48,7 @@ export const config = {
     path.resolve(process.cwd(), '../../data/deployments'),
   healthCheckIntervalSeconds: Number(process.env.HEALTH_CHECK_INTERVAL_SECONDS ?? 0),
   dashboardTargetUrl:
+    process.env.THE_CONTAINERS_DASHBOARD_TARGET_URL ??
     process.env.NAVIPROXY_DASHBOARD_TARGET_URL ??
     `http://127.0.0.1:${Number(process.env.PORT ?? 3001)}`
 };

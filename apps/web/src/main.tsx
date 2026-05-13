@@ -8,16 +8,23 @@ import './styles.css';
 
 type Page = 'dashboard' | 'admin';
 
+const themeKey = 'the-containers-theme';
+const legacyThemeKey = 'naviproxy-theme';
+
 function App() {
   const [page, setPage] = useState<Page>('dashboard');
   const [openDeploySignal, setOpenDeploySignal] = useState(0);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    return localStorage.getItem('naviproxy-theme') === 'dark' ? 'dark' : 'light';
+    return (
+      localStorage.getItem(themeKey) ??
+      localStorage.getItem(legacyThemeKey)
+    ) === 'dark' ? 'dark' : 'light';
   });
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
-    localStorage.setItem('naviproxy-theme', theme);
+    localStorage.setItem(themeKey, theme);
+    localStorage.removeItem(legacyThemeKey);
   }, [theme]);
 
   const tabs = useMemo(
@@ -51,7 +58,7 @@ function App() {
               />
             </span>
             <span>
-              <span className="block text-base font-semibold leading-tight">NaviProxy</span>
+              <span className="block text-base font-semibold leading-tight">The Containers</span>
               <span className="block text-xs text-black/55 dark:text-[#b8c7c1]">
                 Homelab gateway
               </span>

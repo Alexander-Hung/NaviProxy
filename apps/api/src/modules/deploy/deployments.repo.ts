@@ -1,4 +1,4 @@
-import type { NaviDatabase } from '../../db/database.js';
+import type { ContainersDatabase } from '../../db/database.js';
 
 export type DeploymentRecord = {
   appId: string;
@@ -27,7 +27,7 @@ function toRecord(row: DeploymentRow): DeploymentRecord {
 }
 
 export class DeploymentsRepo {
-  constructor(private readonly db: NaviDatabase) {}
+  constructor(private readonly db: ContainersDatabase) {}
 
   findByAppId(appId: string) {
     const row = this.db

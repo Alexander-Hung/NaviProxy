@@ -2,7 +2,7 @@
 
 ## Supported Versions
 
-NaviProxy is currently pre-1.0. Security fixes are applied to the main branch until formal release channels are established.
+The Containers is currently pre-1.0. Security fixes are applied to the main branch until formal release channels are established.
 
 | Version | Supported |
 | --- | --- |
@@ -26,9 +26,9 @@ When reporting, include:
 
 ## Security Model
 
-NaviProxy can call Docker and Docker Compose on the host. This is powerful and must be treated as host-level access.
+The Containers can call Docker and Docker Compose on the host. This is powerful and must be treated as host-level access.
 
-NaviProxy will not silently:
+The Containers will not silently:
 
 - Run `sudo`.
 - Change Docker socket permissions.

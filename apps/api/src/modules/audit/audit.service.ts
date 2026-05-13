@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { NaviDatabase } from '../../db/database.js';
+import type { ContainersDatabase } from '../../db/database.js';
 
 export type AuditInput = {
   action: string;
@@ -12,7 +12,7 @@ export type AuditInput = {
 const auditRetention = 1000;
 
 export class AuditService {
-  constructor(private readonly db: NaviDatabase) {}
+  constructor(private readonly db: ContainersDatabase) {}
 
   record(input: AuditInput) {
     this.db.transaction(() => {

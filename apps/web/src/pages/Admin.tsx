@@ -34,8 +34,8 @@ import {
   type DeployResult,
   type DnsDiagnostic,
   type LocalService,
-  type NaviSettings,
-  type NaviApp,
+  type ContainerSettings,
+  type ContainerApp,
   type ProxyDiagnostics,
   type ProxyHistoryItem,
   type ProxySync,
@@ -77,6 +77,9 @@ const initialDeployForm: DeployPayload = {
   favorite: false,
   enabled: true
 };
+
+const ignoredServicesKey = 'the-containers-ignored-services';
+const legacyIgnoredServicesKey = 'naviproxy-ignored-services';
 
 const deployMethods: Array<{
   id: DeployPayload['method'];
@@ -775,7 +778,7 @@ function DeployHostPermissionSection({
 }
 
 export function Admin({ onBack, openDeploySignal = 0 }: Props) {
-  const [apps, setApps] = useState<NaviApp[]>([]);
+  const [apps, setApps] = useState<ContainerApp[]>([]);
   const [statuses, setStatuses] = useState<Record<string, AppStatus>>({});
   const [healthHistory, setHealthHistory] = useState<AppStatus[]>([]);
   const [history, setHistory] = useState<ProxyHistoryItem[]>([]);
@@ -791,12 +794,17 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   const [showSystemServices, setShowSystemServices] = useState(false);
   const [ignoredServices, setIgnoredServices] = useState<string[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem('naviproxy-ignored-services') ?? '[]');
+      const stored =
+        localStorage.getItem(ignoredServicesKey) ??
+        localStorage.getItem(legacyIgnoredServicesKey) ??
+        '[]';
+
+      return JSON.parse(stored);
     } catch {
       return [];
     }
   });
-  const [settings, setSettings] = useState<NaviSettings | null>(null);
+  const [settings, setSettings] = useState<ContainerSettings | null>(null);
   const [proxyDiagnostics, setProxyDiagnostics] = useState<ProxyDiagnostics | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [backupSnapshots, setBackupSnapshots] = useState<BackupSnapshot[]>([]);
@@ -1107,7 +1115,8 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   function ignoreService(service: LocalService) {
     const next = [...new Set([...ignoredServices, serviceKey(service)])];
     setIgnoredServices(next);
-    localStorage.setItem('naviproxy-ignored-services', JSON.stringify(next));
+    localStorage.setItem(ignoredServicesKey, JSON.stringify(next));
+    localStorage.removeItem(legacyIgnoredServicesKey);
   }
 
   function update<K extends keyof AppPayload>(key: K, value: AppPayload[K]) {
@@ -1172,7 +1181,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     };
   }
 
-  function appPublicUrl(app: NaviApp) {
+  function appPublicUrl(app: ContainerApp) {
     const route =
       app.routeMode === 'subdomain'
         ? app.publicHost
@@ -1197,7 +1206,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     setHealthHistory([]);
   }
 
-  function editApp(app: NaviApp) {
+  function editApp(app: ContainerApp) {
     setEditingId(app.id);
     setForm({
       name: app.name,
@@ -1222,7 +1231,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  function openDetails(app: NaviApp) {
+  function openDetails(app: ContainerApp) {
     setDetailAppId(app.id);
     setDetailHistory([]);
     void api
@@ -1259,7 +1268,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     }
   }
 
-  async function deleteApp(app: NaviApp) {
+  async function deleteApp(app: ContainerApp) {
     const confirmation = app.managedDeployment
       ? `Delete ${app.name} and remove its Docker container? This will also free its published port.`
       : `Delete ${app.name}?`;
@@ -1306,7 +1315,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     }
   }
 
-  async function moveApp(app: NaviApp, direction: -1 | 1) {
+  async function moveApp(app: ContainerApp, direction: -1 | 1) {
     const index = allSortedApps.findIndex((item) => item.id === app.id);
     const target = index + direction;
 
@@ -1336,7 +1345,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `naviproxy-apps-${data.exportedAt.slice(0, 10)}.json`;
+      link.download = `the-containers-apps-${data.exportedAt.slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
       setMessage('Apps exported.');
@@ -1388,7 +1397,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `naviproxy-backup-${data.exportedAt.slice(0, 10)}.json`;
+      link.download = `the-containers-backup-${data.exportedAt.slice(0, 10)}.json`;
       link.click();
       URL.revokeObjectURL(url);
       setMessage('Backup exported.');
@@ -1556,7 +1565,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
-  async function saveSettings(patch: Partial<NaviSettings>) {
+  async function saveSettings(patch: Partial<ContainerSettings>) {
     try {
       const next = await api.updateSettings(patch);
       setSettings(next);
@@ -1715,7 +1724,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
               {form.routeMode === 'subdomain' ? (
                 <p className="mt-2 text-xs leading-5 text-black/50 dark:text-[#a9bbb4]">
                   Use app-first names like homebridge.lab.home, and point either
-                  that host or *.lab.home to the NaviProxy machine in local DNS.
+                  that host or *.lab.home to the machine running The Containers in local DNS.
                 </p>
               ) : null}
             </div>
@@ -2596,7 +2605,8 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                 className="h-11 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
                 onClick={() => {
                   setIgnoredServices([]);
-                  localStorage.removeItem('naviproxy-ignored-services');
+                  localStorage.removeItem(ignoredServicesKey);
+                  localStorage.removeItem(legacyIgnoredServicesKey);
                 }}
               >
                 Reset hidden
@@ -2665,7 +2675,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   value={settings?.tlsMode ?? 'http'}
                   onChange={(event) =>
                     void saveSettings({
-                      tlsMode: event.target.value as NaviSettings['tlsMode']
+                      tlsMode: event.target.value as ContainerSettings['tlsMode']
                     })
                   }
                 >

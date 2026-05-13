@@ -1,14 +1,14 @@
 import { Plus, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { AppCard } from '../components/AppCard';
-import { api, type AppStatus, type NaviApp } from '../lib/api';
+import { api, type AppStatus, type ContainerApp } from '../lib/api';
 
 type Props = {
   onOpenAdmin: () => void;
 };
 
 export function Dashboard({ onOpenAdmin }: Props) {
-  const [apps, setApps] = useState<NaviApp[]>([]);
+  const [apps, setApps] = useState<ContainerApp[]>([]);
   const [statuses, setStatuses] = useState<Record<string, AppStatus>>({});
   const [search, setSearch] = useState('');
   const [favoriteOnly, setFavoriteOnly] = useState(false);
@@ -64,7 +64,7 @@ export function Dashboard({ onOpenAdmin }: Props) {
             Gateway
           </p>
           <h1 className="mt-2 text-3xl font-bold tracking-normal sm:text-4xl">
-            NaviProxy
+            The Containers
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-6 text-black/60 dark:text-[#c5d2cd]">
             A focused dashboard for the services already running across your
@@ -134,7 +134,7 @@ export function Dashboard({ onOpenAdmin }: Props) {
         <section className="mt-8 rounded border border-dashed border-black/20 bg-white p-8 text-center dark:border-white/20 dark:bg-[#141d1a]">
           <h2 className="text-lg font-semibold">No apps yet</h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-black/55 dark:text-[#b8c7c1]">
-            Add your first service and NaviProxy will prepare both the dashboard
+            Add your first service and The Containers will prepare both the dashboard
             card and the reverse proxy route.
           </p>
           <button

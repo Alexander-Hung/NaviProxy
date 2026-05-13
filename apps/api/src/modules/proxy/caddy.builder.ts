@@ -96,7 +96,7 @@ export function buildCaddyConfig(
     apps: {
       http: {
         servers: {
-          naviproxy: server
+          the_containers: server
         }
       }
     }

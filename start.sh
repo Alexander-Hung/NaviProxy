@@ -2,10 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_FILE="${NAVIPROXY_ENV_FILE:-/etc/naviproxy/naviproxy.env}"
+ENV_FILE="${THE_CONTAINERS_ENV_FILE:-${NAVIPROXY_ENV_FILE:-/etc/the-containers/the-containers.env}}"
 
 log() {
-  printf '\n[naviproxy] %s\n' "$1"
+  printf '\n[the-containers] %s\n' "$1"
 }
 
 load_env() {
@@ -13,6 +13,11 @@ load_env() {
     set -a
     # shellcheck disable=SC1090
     . "$ENV_FILE"
+    set +a
+  elif [ -f /etc/naviproxy/naviproxy.env ]; then
+    set -a
+    # shellcheck disable=SC1091
+    . /etc/naviproxy/naviproxy.env
     set +a
   elif [ -f "$ROOT_DIR/.env" ]; then
     set -a
@@ -50,7 +55,7 @@ main() {
   ensure_built
   start_caddy_if_available
 
-  log "Starting NaviProxy..."
+  log "Starting The Containers..."
   HOST_IP="$(hostname -I 2>/dev/null | awk '{print $1}' || echo localhost)"
   if [ "${CADDY_LISTEN:-:80}" = ":80" ]; then
     log "Open: http://$HOST_IP"

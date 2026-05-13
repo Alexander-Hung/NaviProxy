@@ -2,12 +2,12 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ENV_DIR="${NAVIPROXY_ENV_DIR:-/etc/naviproxy}"
-ENV_FILE="${NAVIPROXY_ENV_FILE:-$ENV_DIR/naviproxy.env}"
-DATA_DIR="${NAVIPROXY_DATA_DIR:-$ROOT_DIR/data}"
+ENV_DIR="${THE_CONTAINERS_ENV_DIR:-${NAVIPROXY_ENV_DIR:-/etc/the-containers}}"
+ENV_FILE="${THE_CONTAINERS_ENV_FILE:-${NAVIPROXY_ENV_FILE:-$ENV_DIR/the-containers.env}}"
+DATA_DIR="${THE_CONTAINERS_DATA_DIR:-${NAVIPROXY_DATA_DIR:-$ROOT_DIR/data}}"
 
 log() {
-  printf '\n[naviproxy] %s\n' "$1"
+  printf '\n[the-containers] %s\n' "$1"
 }
 
 need_cmd() {
@@ -81,21 +81,21 @@ write_env() {
   mkdir -p "$DATA_DIR"
 
   if [ ! -f "$ENV_FILE" ]; then
-    cat >"$ROOT_DIR/.naviproxy.env.tmp" <<EOF
+    cat >"$ROOT_DIR/.the-containers.env.tmp" <<EOF
 HOST=0.0.0.0
 PORT=3001
 ADMIN_TOKEN=
 DASHBOARD_AUTH_REQUIRED=false
 CORS_ORIGIN=
-DATABASE_PATH=$DATA_DIR/naviproxy.sqlite
+DATABASE_PATH=$DATA_DIR/the-containers.sqlite
 WEB_DIST_PATH=$ROOT_DIR/apps/web/dist
 CADDY_ADMIN_URL=http://127.0.0.1:2019
 CADDY_SYNC_ENABLED=true
 CADDY_LISTEN=:80
 HEALTH_CHECK_INTERVAL_SECONDS=0
-NAVIPROXY_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
+THE_CONTAINERS_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
 EOF
-    run_root mv "$ROOT_DIR/.naviproxy.env.tmp" "$ENV_FILE"
+    run_root mv "$ROOT_DIR/.the-containers.env.tmp" "$ENV_FILE"
   fi
 }
 
@@ -106,7 +106,7 @@ configure_caddy() {
   fi
 
   if [ -d /etc/caddy ]; then
-    log "Installing NaviProxy Caddyfile..."
+    log "Installing The Containers Caddyfile..."
     run_root cp "$ROOT_DIR/caddy/Caddyfile" /etc/caddy/Caddyfile
     if need_cmd systemctl && systemctl list-unit-files caddy.service >/dev/null 2>&1; then
       run_root systemctl enable caddy >/dev/null 2>&1 || true
@@ -120,12 +120,12 @@ install_node_modules() {
   cd "$ROOT_DIR"
   npm ci
 
-  log "Building NaviProxy..."
+  log "Building The Containers..."
   npm run build
 }
 
 main() {
-  log "Starting NaviProxy one-click install..."
+  log "Starting The Containers one-click install..."
   install_packages
   install_node_modules
   write_env

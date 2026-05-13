@@ -1,14 +1,14 @@
-import type { NaviDatabase } from '../../db/database.js';
+import type { ContainersDatabase } from '../../db/database.js';
 
 export type TlsMode = 'http' | 'auto_https' | 'internal_ca';
 
-export type NaviSettings = {
+export type ContainerSettings = {
   tlsMode: TlsMode;
   dashboardAuthRequired: boolean;
   healthCheckIntervalSeconds: number;
 };
 
-const defaults: NaviSettings = {
+const defaults: ContainerSettings = {
   tlsMode: 'http',
   dashboardAuthRequired: false,
   healthCheckIntervalSeconds: 0
@@ -19,9 +19,9 @@ function isTlsMode(value: unknown): value is TlsMode {
 }
 
 export class SettingsService {
-  constructor(private readonly db: NaviDatabase) {}
+  constructor(private readonly db: ContainersDatabase) {}
 
-  getAll(): NaviSettings {
+  getAll(): ContainerSettings {
     const rows = this.db
       .prepare('SELECT key, value FROM app_settings')
       .all() as Array<{ key: string; value: string }>;
@@ -47,7 +47,7 @@ export class SettingsService {
   normalize(input: unknown, options: { adminTokenConfigured?: boolean } = {}) {
     const current = this.getAll();
     const patch = input && typeof input === 'object' ? input : {};
-    const next: NaviSettings = {
+    const next: ContainerSettings = {
       tlsMode: isTlsMode((patch as { tlsMode?: unknown }).tlsMode)
         ? (patch as { tlsMode: TlsMode }).tlsMode
         : current.tlsMode,
@@ -79,7 +79,7 @@ export class SettingsService {
     return next;
   }
 
-  save(next: NaviSettings) {
+  save(next: ContainerSettings) {
     const upsert = this.db.prepare(
       `INSERT INTO app_settings (key, value, updated_at)
       VALUES (?, ?, CURRENT_TIMESTAMP)

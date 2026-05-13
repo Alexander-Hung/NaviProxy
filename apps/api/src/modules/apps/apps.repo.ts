@@ -1,4 +1,4 @@
-import type { NaviDatabase } from '../../db/database.js';
+import type { ContainersDatabase } from '../../db/database.js';
 import { nanoid } from 'nanoid';
 import type { AppRecord, AppRow, AppStatus } from './apps.types.js';
 
@@ -36,7 +36,7 @@ function toRecord(row: AppRow): AppRecord {
 }
 
 export class AppsRepo {
-  constructor(private readonly db: NaviDatabase) {}
+  constructor(private readonly db: ContainersDatabase) {}
 
   findAll() {
     const rows = this.db

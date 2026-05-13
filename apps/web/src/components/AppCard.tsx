@@ -11,19 +11,19 @@ import {
   Trash2,
   XCircle
 } from 'lucide-react';
-import type { AppStatus, NaviApp } from '../lib/api';
+import type { AppStatus, ContainerApp } from '../lib/api';
 
 type Props = {
-  app: NaviApp;
+  app: ContainerApp;
   status?: AppStatus;
-  onEdit?: (app: NaviApp) => void;
-  onDelete?: (app: NaviApp) => void;
-  onDetails?: (app: NaviApp) => void;
-  onMoveUp?: (app: NaviApp) => void;
-  onMoveDown?: (app: NaviApp) => void;
+  onEdit?: (app: ContainerApp) => void;
+  onDelete?: (app: ContainerApp) => void;
+  onDetails?: (app: ContainerApp) => void;
+  onMoveUp?: (app: ContainerApp) => void;
+  onMoveDown?: (app: ContainerApp) => void;
 };
 
-function appHref(app: NaviApp) {
+function appHref(app: ContainerApp) {
   const host = app.publicHost;
   const path = app.routeMode === 'subpath' ? app.publicPath ?? '' : '';
   const scheme = window.location.protocol === 'https:' ? 'https' : 'http';
@@ -31,7 +31,7 @@ function appHref(app: NaviApp) {
   return `${scheme}://${host}${path}`;
 }
 
-function Icon({ app }: { app: NaviApp }) {
+function Icon({ app }: { app: ContainerApp }) {
   if (app.iconType === 'emoji' && app.iconValue) {
     return <span className="text-2xl">{app.iconValue}</span>;
   }

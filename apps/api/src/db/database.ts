@@ -113,4 +113,4 @@ export function createDatabase() {
   return db;
 }
 
-export type NaviDatabase = ReturnType<typeof createDatabase>;
+export type ContainersDatabase = ReturnType<typeof createDatabase>;

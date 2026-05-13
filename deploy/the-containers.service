@@ -1,0 +1,17 @@
+[Unit]
+Description=The Containers dashboard and reverse proxy controller
+After=network-online.target caddy.service
+Wants=network-online.target caddy.service
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/the-containers
+EnvironmentFile=/etc/the-containers/the-containers.env
+ExecStart=/opt/the-containers/start.sh
+Restart=on-failure
+RestartSec=5
+User=the-containers
+Group=the-containers
+
+[Install]
+WantedBy=multi-user.target

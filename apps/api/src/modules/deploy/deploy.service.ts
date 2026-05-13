@@ -9,7 +9,7 @@ import { promisify } from 'node:util';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import { config } from '../../config.js';
-import type { NaviDatabase } from '../../db/database.js';
+import type { ContainersDatabase } from '../../db/database.js';
 import type { AppsService } from '../apps/apps.service.js';
 import { DeploymentsRepo } from './deployments.repo.js';
 
@@ -314,7 +314,7 @@ function dockerPermissionGrantSteps(message: string): DeployDoctorGrantStep[] {
   if (process.platform === 'linux') {
     steps.push({
       title: 'Allow this user to use Docker',
-      description: 'Add the user that runs NaviProxy to the docker group, then restart the shell or service.',
+      description: 'Add the user that runs The Containers to the docker group, then restart the shell or service.',
       commands: [
         `sudo usermod -aG docker ${username}`,
         'newgrp docker',
@@ -322,14 +322,14 @@ function dockerPermissionGrantSteps(message: string): DeployDoctorGrantStep[] {
       ]
     });
     steps.push({
-      title: 'If NaviProxy runs as a systemd service',
+      title: 'If The Containers runs as a systemd service',
       description: 'Make sure the service process also joins the docker group, then restart the service.',
       commands: [
-        'sudo systemctl edit naviproxy',
+        'sudo systemctl edit the-containers',
         '[Service]',
         'SupplementaryGroups=docker',
         'sudo systemctl daemon-reload',
-        'sudo systemctl restart naviproxy'
+        'sudo systemctl restart the-containers'
       ]
     });
     return steps;
@@ -337,8 +337,8 @@ function dockerPermissionGrantSteps(message: string): DeployDoctorGrantStep[] {
 
   if (process.platform === 'darwin') {
     steps.push({
-      title: 'Use Colima with the same user as NaviProxy',
-      description: 'Start Colima and launch NaviProxy from a shell that points Docker at the Colima socket.',
+      title: 'Use Colima with the same user as The Containers',
+      description: 'Start Colima and launch The Containers from a shell that points Docker at the Colima socket.',
       commands: [
         'colima start',
         'export DOCKER_HOST=unix://$HOME/.colima/default/docker.sock',
@@ -348,7 +348,7 @@ function dockerPermissionGrantSteps(message: string): DeployDoctorGrantStep[] {
     });
     steps.push({
       title: 'Use Docker Desktop',
-      description: 'Open Docker Desktop once and allow its privileged helper, then restart NaviProxy.',
+      description: 'Open Docker Desktop once and allow its privileged helper, then restart The Containers.',
       commands: [
         'open -a Docker',
         'docker info',
@@ -361,15 +361,15 @@ function dockerPermissionGrantSteps(message: string): DeployDoctorGrantStep[] {
   if (process.platform === 'win32') {
     steps.push({
       title: 'Start Docker Desktop for Windows',
-      description: 'NaviProxy needs Docker Desktop or another Docker daemon reachable from this Windows user.',
+      description: 'The Containers needs Docker Desktop or another Docker daemon reachable from this Windows user.',
       commands: [
         'Start-Process "Docker Desktop"',
         'docker info'
       ]
     });
     steps.push({
-      title: 'Point NaviProxy at Docker on Windows',
-      description: 'If Docker is installed in a custom location, start NaviProxy with the full docker.exe path.',
+      title: 'Point The Containers at Docker on Windows',
+      description: 'If Docker is installed in a custom location, start The Containers with the full docker.exe path.',
       commands: [
         'where docker',
         '$env:DOCKER_BIN="C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe"',
@@ -380,8 +380,8 @@ function dockerPermissionGrantSteps(message: string): DeployDoctorGrantStep[] {
   }
 
   steps.push({
-    title: 'Grant Docker access to the NaviProxy process',
-    description: 'Run NaviProxy as a user that can execute Docker and access the Docker daemon socket.',
+    title: 'Grant Docker access to the process running The Containers',
+    description: 'Run The Containers as a user that can execute Docker and access the Docker daemon socket.',
     commands: [
       'docker info',
       'DOCKER_BIN=/full/path/to/docker npm run dev'
@@ -437,7 +437,7 @@ async function dockerConfigWithoutCredentialHelpers() {
   const sourceDir =
     process.env.DOCKER_CONFIG ??
     (process.env.HOME ? path.join(process.env.HOME, '.docker') : null);
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'naviproxy-docker-'));
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'the-containers-docker-'));
   let dockerConfig: Record<string, unknown> = {};
 
   if (sourceDir) {
@@ -504,7 +504,7 @@ async function runDockerCommand(args: string[], options: { timeout?: number } = 
         });
       } catch (retryError) {
         throw new DeployExecutionError(
-          `${commandDetail(retryError) || detail} NaviProxy also tried a sanitized Docker config without the missing credential helper.`
+          `${commandDetail(retryError) || detail} The Containers also tried a sanitized Docker config without the missing credential helper.`
         );
       } finally {
         if (dockerConfig) {
@@ -515,7 +515,7 @@ async function runDockerCommand(args: string[], options: { timeout?: number } = 
 
     if (isDockerPermissionDenied(detail)) {
       throw new DeployRuntimeUnavailableError(
-        `${detail} NaviProxy cannot change Docker socket permissions safely. Start Docker with permissions for this user, or run NaviProxy as a user that can access Docker.`
+        `${detail} The Containers cannot change Docker socket permissions safely. Start Docker with permissions for this user, or run The Containers as a user that can access Docker.`
       );
     }
 
@@ -531,7 +531,7 @@ async function runDockerCommand(args: string[], options: { timeout?: number } = 
       }
 
       const recoveryNote = pointsToColima(detail)
-        ? ' NaviProxy tried to start or restart Colima automatically, but Docker is still unavailable.'
+        ? ' The Containers tried to start or restart Colima automatically, but Docker is still unavailable.'
         : ' Start Docker, or point DOCKER_HOST/DOCKER_BIN at a running Docker runtime.';
 
       throw new DeployRuntimeUnavailableError(`${detail}${recoveryNote}`);
@@ -635,7 +635,7 @@ function planWithExistingContainer(
 
   if (!hostPort || !Number.isInteger(hostPort)) {
     throw new DeployExecutionError(
-      `Existing container ${plan.containerName} does not publish a TCP port NaviProxy can route to.`
+      `Existing container ${plan.containerName} does not publish a TCP port The Containers can route to.`
     );
   }
 
@@ -900,7 +900,7 @@ async function ensureHostMountsWritable(mounts: HostMount[]) {
 
       if (isNodeError(error) && (error.code === 'EACCES' || error.code === 'EPERM')) {
         throw new DeployRuntimeUnavailableError(
-          `Docker bind mount path "${source}" is not readable and writable by NaviProxy. Move the app data to a writable path or fix permissions before deploying.`
+          `Docker bind mount path "${source}" is not readable and writable by The Containers. Move the app data to a writable path or fix permissions before deploying.`
         );
       }
 
@@ -1018,7 +1018,7 @@ async function mountRequirement(mount: HostMount): Promise<DeployPermissionRequi
       label: `Bind mount ${mount.source}`,
       status: 'ready',
       userHelpRequired: false,
-      detail: `${source} is readable and writable by NaviProxy.`,
+      detail: `${source} is readable and writable by The Containers.`,
       commands: []
     };
   } catch (error) {
@@ -1029,7 +1029,7 @@ async function mountRequirement(mount: HostMount): Promise<DeployPermissionRequi
           label: `Bind mount ${mount.source}`,
           status: 'auto',
           userHelpRequired: false,
-          detail: `${source} does not exist yet. NaviProxy will create it before Docker starts.`,
+          detail: `${source} does not exist yet. The Containers will create it before Docker starts.`,
           commands: []
         };
       }
@@ -1039,7 +1039,7 @@ async function mountRequirement(mount: HostMount): Promise<DeployPermissionRequi
         label: `Bind mount ${mount.source}`,
         status: 'blocked',
         userHelpRequired: true,
-        detail: `${source} is in a protected system location. Create it and grant ownership to the NaviProxy user first.`,
+        detail: `${source} is in a protected system location. Create it and grant ownership to the user running The Containers first.`,
         commands: createPathCommands(source)
       };
     }
@@ -1050,7 +1050,7 @@ async function mountRequirement(mount: HostMount): Promise<DeployPermissionRequi
         label: `Bind mount ${mount.source}`,
         status: 'blocked',
       userHelpRequired: true,
-      detail: `${source} exists but NaviProxy cannot read and write it.`,
+      detail: `${source} exists but The Containers cannot read and write it.`,
       commands: fixPathPermissionCommands(source)
     };
   }
@@ -1073,7 +1073,7 @@ async function portRequirement(port: number | null): Promise<DeployPermissionReq
       label: 'Host port',
       status: 'auto',
       userHelpRequired: false,
-      detail: 'No host port was requested. NaviProxy will assign a free port automatically.',
+      detail: 'No host port was requested. The Containers will assign a free port automatically.',
       commands: []
     };
   }
@@ -1084,7 +1084,7 @@ async function portRequirement(port: number | null): Promise<DeployPermissionReq
       label: `Host port ${port}`,
       status: 'auto',
       userHelpRequired: false,
-      detail: `Port ${port} normally needs elevated system privileges. NaviProxy will route through an automatically assigned high port instead.`,
+      detail: `Port ${port} normally needs elevated system privileges. The Containers will route through an automatically assigned high port instead.`,
       commands: []
     };
   }
@@ -1095,7 +1095,7 @@ async function portRequirement(port: number | null): Promise<DeployPermissionReq
       label: `Host port ${port}`,
       status: 'auto',
       userHelpRequired: false,
-      detail: `Port ${port} is already in use. NaviProxy will assign another free port automatically.`,
+      detail: `Port ${port} is already in use. The Containers will assign another free port automatically.`,
       commands: []
     };
   }
@@ -1181,7 +1181,7 @@ async function publicDomainRequirements(
       status: config.caddySyncEnabled ? 'ready' : 'needs_user',
       userHelpRequired: !config.caddySyncEnabled,
       detail: config.caddySyncEnabled
-        ? 'Caddy sync is enabled, so NaviProxy will bind this domain in the reverse proxy config.'
+        ? 'Caddy sync is enabled, so The Containers will bind this domain in the reverse proxy config.'
         : 'Caddy sync is disabled. The app will be saved, but the public domain will not be applied to Caddy automatically.',
       commands: config.caddySyncEnabled
         ? []
@@ -1256,7 +1256,7 @@ async function commandPermissionRequirements(input: unknown) {
         label: 'Compose project',
         status: 'auto',
         userHelpRequired: false,
-        detail: 'NaviProxy will create a managed Compose project directory and run docker compose up -d.',
+        detail: 'The Containers will create a managed Compose project directory and run docker compose up -d.',
         commands: []
       });
       if (composeUsesHostNetwork(command)) {
@@ -1265,7 +1265,7 @@ async function commandPermissionRequirements(input: unknown) {
           label: 'Host network',
           status: 'needs_user',
           userHelpRequired: true,
-          detail: 'This Compose file uses network_mode: host. NaviProxy will not inject ports; it will route to the inferred host port directly.',
+          detail: 'This Compose file uses network_mode: host. The Containers will not inject ports; it will route to the inferred host port directly.',
           commands: []
         });
       }
@@ -2186,7 +2186,7 @@ async function resolveHostPort(requestedHostPort: number | null, warnings: strin
   if (needsPrivilegedPortRemap(requestedHostPort)) {
     const allocated = await allocatePort(null);
     warnings.push(
-      `Host port ${requestedHostPort} needs elevated system privileges, so NaviProxy assigned ${allocated} instead.`
+      `Host port ${requestedHostPort} needs elevated system privileges, so The Containers assigned ${allocated} instead.`
     );
     return allocated;
   }
@@ -2197,7 +2197,7 @@ async function resolveHostPort(requestedHostPort: number | null, warnings: strin
 
   const allocated = await allocatePort(null);
   warnings.push(
-    `Host port ${requestedHostPort} is already in use, so NaviProxy assigned ${allocated} instead.`
+    `Host port ${requestedHostPort} is already in use, so The Containers assigned ${allocated} instead.`
   );
   return allocated;
 }
@@ -2206,7 +2206,7 @@ export class DeployService {
   private readonly repo: DeploymentsRepo;
 
   constructor(
-    db: NaviDatabase,
+    db: ContainersDatabase,
     private readonly appsService: AppsService
   ) {
     this.repo = new DeploymentsRepo(db);
@@ -2333,7 +2333,7 @@ export class DeployService {
 
     checks.push({
       id: 'process-user',
-      label: 'NaviProxy user',
+      label: 'The Containers user',
       status: 'pass',
       detail: `${os.userInfo().username || 'unknown'} on ${process.platform}`
     });
@@ -2366,8 +2366,8 @@ export class DeployService {
         detail
       });
       grantSteps.push({
-        title: 'Point NaviProxy at Docker',
-        description: 'Install Docker or start NaviProxy with the full Docker binary path.',
+        title: 'Point The Containers at Docker',
+        description: 'Install Docker or start The Containers with the full Docker binary path.',
         commands: [
           'which docker',
           'DOCKER_BIN=/full/path/to/docker npm run dev'
@@ -2393,8 +2393,8 @@ export class DeployService {
         label: 'Docker group',
         status: groups.includes('docker') ? 'pass' : 'warn',
         detail: groups.includes('docker')
-          ? 'The NaviProxy process user is in the docker group.'
-          : 'The NaviProxy process user is not in the docker group. Docker may still work through rootless Docker or DOCKER_HOST.'
+          ? 'The process user running The Containers is in the docker group.'
+          : 'The process user running The Containers is not in the docker group. Docker may still work through rootless Docker or DOCKER_HOST.'
       });
     }
 
@@ -2752,7 +2752,7 @@ export class DeployService {
     const warnings: string[] = [
       ...(selectedPublishedPort || parsed.containerPort
         ? []
-        : [`No Compose ports mapping was found, so NaviProxy inferred container port ${containerPort}.`])
+        : [`No Compose ports mapping was found, so The Containers inferred container port ${containerPort}.`])
     ];
     const hostPort =
       hostNetwork
@@ -2820,7 +2820,7 @@ export class DeployService {
       dockerArgs,
       warnings: [
         ...warnings,
-        'NaviProxy will write this Compose file into its managed deployments directory.',
+        'The Containers will write this Compose file into its managed deployments directory.',
         ...(hostNetwork
           ? ['Host network mode detected; ports will not be injected into the Compose file.']
           : []),

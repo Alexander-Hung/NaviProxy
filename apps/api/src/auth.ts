@@ -3,7 +3,9 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { config } from './config.js';
 
 function requestToken(request: FastifyRequest) {
-  const direct = request.headers['x-naviproxy-token'];
+  const direct =
+    request.headers['x-the-containers-token'] ??
+    request.headers['x-naviproxy-token'];
 
   if (typeof direct === 'string') {
     return direct;

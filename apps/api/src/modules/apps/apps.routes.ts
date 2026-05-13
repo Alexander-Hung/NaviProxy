@@ -37,7 +37,7 @@ export async function registerAppsRoutes(
 ) {
   app.get('/api/health', async () => ({
     ok: true,
-    name: 'NaviProxy',
+    name: 'The Containers',
     authRequired: Boolean(config.adminToken)
   }));
 

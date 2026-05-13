@@ -25,7 +25,7 @@ const baseApp: AppRecord = {
 
 test('builds http-only caddy config by default', () => {
   const config = buildCaddyConfig([baseApp], ':80', 'http://127.0.0.1:3001');
-  const server = config.apps.http.servers.naviproxy;
+  const server = config.apps.http.servers.the_containers;
 
   assert.deepEqual(server.listen, [':80']);
   assert.equal(server.routes.length, 2);
@@ -39,7 +39,7 @@ test('adds tls server policy for internal CA mode', () => {
     'internal_ca'
   );
 
-  assert.deepEqual(config.apps.http.servers.naviproxy.listen, [':80', ':443']);
+  assert.deepEqual(config.apps.http.servers.the_containers.listen, [':80', ':443']);
   assert.equal(
     (config as { apps: { tls: { automation: { policies: Array<{ issuers: Array<{ module: string }> }> } } } })
       .apps.tls.automation.policies[0].issuers[0].module,

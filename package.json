@@ -1,28 +1,28 @@
 {
-  "name": "naviproxy",
+  "name": "the-containers",
   "version": "0.1.0",
   "private": true,
-  "description": "A lightweight dashboard and reverse proxy gateway for homelabs.",
+  "description": "A lightweight dashboard, reverse proxy controller, and self-host deployment manager.",
   "license": "MIT",
   "author": "Alexander-Hung",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Alexander-Hung/NaviProxy.git"
+    "url": "git+https://github.com/Alexander-Hung/the-containers.git"
   },
   "bugs": {
-    "url": "https://github.com/Alexander-Hung/NaviProxy/issues"
+    "url": "https://github.com/Alexander-Hung/the-containers/issues"
   },
-  "homepage": "https://github.com/Alexander-Hung/NaviProxy#readme",
+  "homepage": "https://github.com/Alexander-Hung/the-containers#readme",
   "workspaces": [
     "apps/*"
   ],
   "scripts": {
-    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @naviproxy/api\" \"npm run dev -w @naviproxy/web\"",
-    "build": "npm run build -w @naviproxy/api && npm run build -w @naviproxy/web",
-    "lint": "npm run lint -w @naviproxy/api && npm run lint -w @naviproxy/web",
-    "start": "npm run start -w @naviproxy/api",
-    "typecheck": "npm run typecheck -w @naviproxy/api && npm run typecheck -w @naviproxy/web",
-    "test": "npm run test -w @naviproxy/api",
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w @the-containers/api\" \"npm run dev -w @the-containers/web\"",
+    "build": "npm run build -w @the-containers/api && npm run build -w @the-containers/web",
+    "lint": "npm run lint -w @the-containers/api && npm run lint -w @the-containers/web",
+    "start": "npm run start -w @the-containers/api",
+    "typecheck": "npm run typecheck -w @the-containers/api && npm run typecheck -w @the-containers/web",
+    "test": "npm run test -w @the-containers/api",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

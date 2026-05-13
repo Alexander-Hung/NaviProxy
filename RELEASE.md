@@ -1,10 +1,10 @@
 # Release Process
 
-This document describes how to prepare NaviProxy releases.
+This document describes how to prepare The Containers releases.
 
 ## Versioning
 
-NaviProxy uses Semantic Versioning:
+The Containers uses Semantic Versioning:
 
 ```txt
 MAJOR.MINOR.PATCH
@@ -77,7 +77,7 @@ During `0.x`, breaking changes may happen, but they must be documented in `CHANG
 ## Release Notes Template
 
 ```md
-## NaviProxy vX.Y.Z
+## The Containers vX.Y.Z
 
 ### Highlights
 
@@ -101,11 +101,11 @@ During `0.x`, breaking changes may happen, but they must be documented in `CHANG
 
 ### Upgrade Notes
 
-1. Back up `data/naviproxy.sqlite`.
+1. Back up `data/the-containers.sqlite`.
 2. Pull the latest code.
 3. Run `npm ci`.
 4. Run `npm run build`.
-5. Restart NaviProxy.
+5. Restart The Containers.
 ```
 
 ## Pre-release Builds

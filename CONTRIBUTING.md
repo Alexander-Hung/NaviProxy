@@ -1,6 +1,6 @@
-# Contributing to NaviProxy
+# Contributing to The Containers
 
-Thank you for your interest in improving NaviProxy.
+Thank you for your interest in improving The Containers.
 
 ## Project Language
 

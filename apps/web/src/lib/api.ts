@@ -1,7 +1,7 @@
 export type RouteMode = 'subdomain' | 'subpath';
 export type IconType = 'url' | 'emoji' | 'builtin';
 
-export type NaviApp = {
+export type ContainerApp = {
   id: string;
   name: string;
   slug: string;
@@ -28,12 +28,12 @@ export type ProxySync = {
 };
 
 export type AppMutationResult = {
-  app: NaviApp;
+  app: ContainerApp;
   proxySync: ProxySync;
 };
 
 export type AppListMutationResult = {
-  apps: NaviApp[];
+  apps: ContainerApp[];
   proxySync: ProxySync;
 };
 
@@ -86,7 +86,7 @@ export type LocalService = {
   targetUrl: string;
 };
 
-export type NaviSettings = {
+export type ContainerSettings = {
   tlsMode: 'http' | 'auto_https' | 'internal_ca';
   dashboardAuthRequired: boolean;
   healthCheckIntervalSeconds: number;
@@ -109,8 +109,8 @@ export type BackupSnapshot = {
   payload: {
     exportedAt: string;
     version: number;
-    apps: NaviApp[];
-    settings: NaviSettings;
+    apps: ContainerApp[];
+    settings: ContainerSettings;
   };
 };
 
@@ -155,7 +155,7 @@ export type DeployPlan = {
 export type DeployResult = {
   containerId: string;
   plan: DeployPlan;
-  app: NaviApp;
+  app: ContainerApp;
   proxySync: ProxySync;
 };
 
@@ -202,7 +202,8 @@ export type AppPayload = {
   favorite: boolean;
 };
 
-const tokenKey = 'naviproxy-admin-token';
+const tokenKey = 'the-containers-admin-token';
+const legacyTokenKey = 'naviproxy-admin-token';
 let memoryToken = '';
 
 function readStoredToken() {
@@ -213,11 +214,20 @@ function readStoredToken() {
       return sessionToken;
     }
 
-    const legacyToken = localStorage.getItem(tokenKey);
+    const legacySessionToken = sessionStorage.getItem(legacyTokenKey);
+
+    if (legacySessionToken) {
+      sessionStorage.setItem(tokenKey, legacySessionToken);
+      sessionStorage.removeItem(legacyTokenKey);
+      return legacySessionToken;
+    }
+
+    const legacyToken = localStorage.getItem(tokenKey) ?? localStorage.getItem(legacyTokenKey);
 
     if (legacyToken) {
       sessionStorage.setItem(tokenKey, legacyToken);
       localStorage.removeItem(tokenKey);
+      localStorage.removeItem(legacyTokenKey);
       return legacyToken;
     }
   } catch {
@@ -237,7 +247,9 @@ export function setAdminToken(token: string) {
   if (token) {
     try {
       sessionStorage.setItem(tokenKey, token);
+      sessionStorage.removeItem(legacyTokenKey);
       localStorage.removeItem(tokenKey);
+      localStorage.removeItem(legacyTokenKey);
     } catch {
       // Keep the token in memory for storage-restricted browsers.
     }
@@ -246,7 +258,9 @@ export function setAdminToken(token: string) {
 
   try {
     sessionStorage.removeItem(tokenKey);
+    sessionStorage.removeItem(legacyTokenKey);
     localStorage.removeItem(tokenKey);
+    localStorage.removeItem(legacyTokenKey);
   } catch {
     // Nothing else to clear when browser storage is unavailable.
   }
@@ -260,8 +274,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers.set('Content-Type', 'application/json');
   }
 
-  if (token && !headers.has('X-NaviProxy-Token')) {
-    headers.set('X-NaviProxy-Token', token);
+  if (token && !headers.has('X-The-Containers-Token')) {
+    headers.set('X-The-Containers-Token', token);
   }
 
   const response = await fetch(path, {
@@ -300,7 +314,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<HealthInfo>('/api/health'),
-  listApps: () => request<NaviApp[]>('/api/apps'),
+  listApps: () => request<ContainerApp[]>('/api/apps'),
   appStatuses: () => request<AppStatus[]>('/api/apps/status'),
   runAppStatusCheck: () =>
     request<AppStatus[]>('/api/apps/status/check', {
@@ -335,7 +349,7 @@ export const api = {
       body: JSON.stringify({ ids })
     }),
   exportApps: () =>
-    request<{ exportedAt: string; apps: NaviApp[] }>('/api/apps/export'),
+    request<{ exportedAt: string; apps: ContainerApp[] }>('/api/apps/export'),
   importApps: (apps: unknown[]) =>
     request<AppListMutationResult>('/api/apps/import', {
       method: 'POST',
@@ -351,9 +365,9 @@ export const api = {
     request<{ scannedAt: string; services: LocalService[] }>(
       '/api/diagnostics/local-services'
     ),
-  settings: () => request<NaviSettings>('/api/settings'),
-  updateSettings: (payload: Partial<NaviSettings>) =>
-    request<NaviSettings>('/api/settings', {
+  settings: () => request<ContainerSettings>('/api/settings'),
+  updateSettings: (payload: Partial<ContainerSettings>) =>
+    request<ContainerSettings>('/api/settings', {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
@@ -361,11 +375,11 @@ export const api = {
     request<{
       exportedAt: string;
       version: number;
-      apps: NaviApp[];
-      settings: NaviSettings;
+      apps: ContainerApp[];
+      settings: ContainerSettings;
     }>('/api/backup'),
   restoreBackup: (payload: unknown) =>
-    request<AppListMutationResult & { settings: NaviSettings }>(
+    request<AppListMutationResult & { settings: ContainerSettings }>(
       '/api/backup/restore',
       {
         method: 'POST',

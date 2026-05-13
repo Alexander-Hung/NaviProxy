@@ -1,6 +1,6 @@
-# NaviProxy
+# The Containers
 
-NaviProxy is a lightweight homelab dashboard, reverse proxy controller, and self-host deployment manager. It gives users one place to register existing services, deploy Docker-based apps, assign ports, bind routes, check health, and keep Caddy reverse proxy configuration in sync.
+The Containers is a lightweight homelab dashboard, reverse proxy controller, and self-host deployment manager. It gives users one place to register existing services, deploy Docker-based apps, assign ports, bind routes, check health, and keep Caddy reverse proxy configuration in sync.
 
 The project is designed for mini PCs, NAS boxes, Raspberry Pi hosts, home servers, and small cloud machines. It treats services as plain HTTP upstreams, so Docker, Docker Compose, bare-metal processes, NAS apps, and LAN devices can all appear in the same dashboard.
 
@@ -12,12 +12,12 @@ Available now:
 - Admin panel for app CRUD, import/export, backup/restore, settings, audits, diagnostics, and proxy sync.
 - Caddy Admin API integration for generated reverse proxy configuration.
 - Subdomain and subpath routing modes. Subdomain mode is recommended.
-- Local service discovery for ports already listening on the NaviProxy host.
+- Local service discovery for ports already listening on the host running The Containers.
 - DNS diagnostics for route and public domain checks.
 - Docker run deployments with command parsing, automatic port assignment, permission checks, and managed cleanup.
 - Docker Compose deployments with YAML parsing, web service selection, port inference, bind mount checks, host network handling, and managed cleanup.
 - Host permission panel for Docker CLI, Docker daemon, Compose runtime, bind mounts, privileged containers, capabilities, devices, host networking, Docker socket mounts, public domain DNS, and Caddy sync.
-- Managed deployment records. Apps deployed by NaviProxy are marked as managed and are cleaned up when deleted.
+- Managed deployment records. Apps deployed by The Containers are marked as managed and are cleaned up when deleted.
 
 Planned:
 
@@ -80,22 +80,22 @@ PORT=3001
 ADMIN_TOKEN=
 DASHBOARD_AUTH_REQUIRED=false
 CORS_ORIGIN=
-DATABASE_PATH=/opt/naviproxy/data/naviproxy.sqlite
-WEB_DIST_PATH=/opt/naviproxy/apps/web/dist
+DATABASE_PATH=/opt/the-containers/data/the-containers.sqlite
+WEB_DIST_PATH=/opt/the-containers/apps/web/dist
 CADDY_ADMIN_URL=http://127.0.0.1:2019
 CADDY_SYNC_ENABLED=true
 CADDY_LISTEN=:80
 DOCKER_BIN=docker
-DEPLOYMENTS_PATH=/opt/naviproxy/data/deployments
+DEPLOYMENTS_PATH=/opt/the-containers/data/deployments
 HEALTH_CHECK_INTERVAL_SECONDS=0
-NAVIPROXY_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
+THE_CONTAINERS_DASHBOARD_TARGET_URL=http://127.0.0.1:3001
 ```
 
 For production, set a strong `ADMIN_TOKEN`. Set `DASHBOARD_AUTH_REQUIRED=true` if the read-only dashboard should also require authentication.
 
 ## Deployments
 
-NaviProxy can deploy from:
+The Containers can deploy from:
 
 - `docker run` commands
 - Docker Compose YAML
@@ -103,17 +103,17 @@ NaviProxy can deploy from:
 The deploy flow is:
 
 1. Paste a command or Compose file.
-2. NaviProxy auto-fills app name, route host, and ports when possible.
+2. The Containers auto-fills app name, route host, and ports when possible.
 3. Review Host permission checks.
 4. Preview the deployment plan.
 5. Deploy.
-6. NaviProxy creates the app route and saves a managed deployment record.
+6. The Containers creates the app route and saves a managed deployment record.
 
-When a managed app is deleted, NaviProxy attempts to remove the related Docker container or Compose project and free the route.
+When a managed app is deleted, The Containers attempts to remove the related Docker container or Compose project and free the route.
 
 ## Important Safety Model
 
-NaviProxy automates common deployment work, but it does not bypass operating system permissions.
+The Containers automates common deployment work, but it does not bypass operating system permissions.
 
 It can automatically:
 
@@ -133,7 +133,7 @@ It will not silently:
 - Expose Caddy Admin API to the public internet.
 - Override protected host paths without user action.
 
-Host permission checks are shown before deploy so users can see what is ready, what NaviProxy can handle, and what needs manual host authorization.
+Host permission checks are shown before deploy so users can see what is ready, what The Containers can handle, and what needs manual host authorization.
 
 ## Testing
 
@@ -155,7 +155,7 @@ Release preparation is documented in [RELEASE.md](RELEASE.md), and user-facing c
 
 ## License
 
-NaviProxy is released under the [MIT License](LICENSE).
+The Containers is released under the [MIT License](LICENSE).
 
 ## Notes for Maintainers
 
