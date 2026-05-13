@@ -1509,6 +1509,7 @@ export class DeployService {
         {
           id: 'docker_run',
           name: 'Docker run',
+          status: 'available',
           capabilities: [
             'paste-command',
             'auto-port',
@@ -1520,7 +1521,88 @@ export class DeployService {
         {
           id: 'docker_compose',
           name: 'Docker Compose',
-          status: 'planned'
+          status: 'planned',
+          capabilities: [
+            'compose-yaml',
+            'compose-file',
+            'project-name',
+            'managed-down',
+            'reverse-proxy'
+          ]
+        },
+        {
+          id: 'github_auto',
+          name: 'GitHub auto-detect',
+          status: 'planned',
+          capabilities: [
+            'git-clone',
+            'detect-compose',
+            'detect-package-json',
+            'detect-static-site',
+            'detect-python',
+            'detect-dockerfile'
+          ]
+        },
+        {
+          id: 'static_site',
+          name: 'Static site build',
+          status: 'planned',
+          capabilities: [
+            'npm-build',
+            'pnpm-build',
+            'bun-build',
+            'static-serve',
+            'reverse-proxy'
+          ]
+        },
+        {
+          id: 'node_app',
+          name: 'Node app',
+          status: 'planned',
+          capabilities: [
+            'npm',
+            'pnpm',
+            'yarn',
+            'bun',
+            'process-manager',
+            'reverse-proxy'
+          ]
+        },
+        {
+          id: 'python_app',
+          name: 'Python app',
+          status: 'planned',
+          capabilities: [
+            'requirements',
+            'pyproject',
+            'uv',
+            'pip',
+            'process-manager',
+            'reverse-proxy'
+          ]
+        },
+        {
+          id: 'binary_service',
+          name: 'Binary or system service',
+          status: 'planned',
+          capabilities: [
+            'release-asset',
+            'systemd',
+            'launchd',
+            'windows-service',
+            'reverse-proxy'
+          ]
+        },
+        {
+          id: 'custom_command',
+          name: 'Advanced custom command',
+          status: 'planned',
+          capabilities: [
+            'user-provided-install',
+            'user-provided-start',
+            'manual-port',
+            'reverse-proxy'
+          ]
         },
         {
           id: 'existing_service',

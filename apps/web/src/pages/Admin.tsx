@@ -78,6 +78,62 @@ const initialDeployForm: DeployPayload = {
   enabled: true
 };
 
+const deployMethods: Array<{
+  id: DeployPayload['method'];
+  title: string;
+  detail: string;
+  status: 'available' | 'planned';
+}> = [
+  {
+    id: 'docker_run',
+    title: 'Docker run',
+    detail: 'Paste a docker run command',
+    status: 'available'
+  },
+  {
+    id: 'docker_compose',
+    title: 'Docker Compose',
+    detail: 'compose.yml or compose command',
+    status: 'planned'
+  },
+  {
+    id: 'github_auto',
+    title: 'GitHub auto',
+    detail: 'Clone repo and detect deploy type',
+    status: 'planned'
+  },
+  {
+    id: 'static_site',
+    title: 'Static site',
+    detail: 'Build and serve dist output',
+    status: 'planned'
+  },
+  {
+    id: 'node_app',
+    title: 'Node app',
+    detail: 'npm/pnpm/yarn/bun service',
+    status: 'planned'
+  },
+  {
+    id: 'python_app',
+    title: 'Python app',
+    detail: 'pip/uv service',
+    status: 'planned'
+  },
+  {
+    id: 'binary_service',
+    title: 'Binary/service',
+    detail: 'release asset or system service',
+    status: 'planned'
+  },
+  {
+    id: 'custom_command',
+    title: 'Custom command',
+    detail: 'advanced install/start commands',
+    status: 'planned'
+  }
+];
+
 function tokenizeDeployCommand(command: string) {
   const tokens: string[] = [];
   let current = '';
@@ -485,6 +541,12 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     serviceSearch,
     showSystemServices
   ]);
+  const selectedDeployMethod = useMemo(
+    () =>
+      deployMethods.find((method) => method.id === deployForm.method) ??
+      deployMethods[0],
+    [deployForm.method]
+  );
 
   function proxySyncMessage(sync?: ProxySync) {
     if (!sync) {
@@ -950,6 +1012,11 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   }
 
   async function previewDeploy() {
+    if (deployForm.method !== 'docker_run') {
+      setError(`${selectedDeployMethod.title} is planned. Docker run is available now.`);
+      return;
+    }
+
     setPreviewingDeploy(true);
     setError(null);
     setMessage(null);
@@ -966,6 +1033,11 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   }
 
   async function deployDockerRun() {
+    if (deployForm.method !== 'docker_run') {
+      setError(`${selectedDeployMethod.title} is planned. Docker run is available now.`);
+      return;
+    }
+
     const currentDoctor = deployDoctor ?? await api.deployDoctor(deployPayload());
     setDeployDoctor(currentDoctor);
 
@@ -1739,15 +1811,63 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
 
             <div className="grid gap-3">
               <div>
+                <span className="label">Deploy method</span>
+                <div className="grid gap-2 md:grid-cols-4">
+                  {deployMethods.map((method) => (
+                    <button
+                      key={method.id}
+                      type="button"
+                      className={`rounded border p-3 text-left transition ${
+                        deployForm.method === method.id
+                          ? 'border-spruce bg-spruce/10 text-spruce dark:border-[#8fe0ce]/60 dark:bg-[#8fe0ce]/10 dark:text-[#9be8d7]'
+                          : 'border-black/10 bg-white/70 text-black/60 hover:text-black dark:border-white/15 dark:bg-white/[0.04] dark:text-[#b8c7c1] dark:hover:text-white'
+                      }`}
+                      onClick={() => {
+                        updateDeploy('method', method.id);
+                      }}
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold">{method.title}</span>
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] uppercase ${
+                            method.status === 'available'
+                              ? 'bg-spruce/10 text-spruce dark:bg-[#8fe0ce]/10 dark:text-[#9be8d7]'
+                              : 'bg-amber/10 text-amber'
+                          }`}
+                        >
+                          {method.status === 'available' ? 'ready' : 'next'}
+                        </span>
+                      </span>
+                      <span className="mt-1 block text-[11px] opacity-75">
+                        {method.detail}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {selectedDeployMethod.status === 'planned' ? (
+                  <div className="mt-2 rounded border border-amber/30 bg-amber/10 p-3 text-xs text-black/65 dark:text-[#d5caa2]">
+                    {selectedDeployMethod.title} is queued for the universal GitHub deploy flow. Use Docker run now, or add the repo as an existing service after starting it manually.
+                  </div>
+                ) : null}
+              </div>
+
+              <div>
                 <label className="label" htmlFor="deployCommand">
-                  Docker command
+                  {deployForm.method === 'docker_run'
+                    ? 'Docker command'
+                    : `${selectedDeployMethod.title} input`}
                 </label>
                 <textarea
                   id="deployCommand"
                   className="field min-h-28 resize-y py-3"
                   value={deployForm.command}
                   onChange={(event) => updateDeployCommand(event.target.value)}
-                  placeholder="docker run -d --name app -p 8080:80 image:tag"
+                  placeholder={
+                    deployForm.method === 'docker_run'
+                      ? 'docker run -d --name app -p 8080:80 image:tag'
+                      : 'This deploy method is planned'
+                  }
+                  disabled={deployForm.method !== 'docker_run'}
                 />
               </div>
 
@@ -1999,7 +2119,11 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                 <button
                   className="inline-flex h-10 items-center gap-2 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black disabled:opacity-60 dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
                   onClick={() => void previewDeploy()}
-                  disabled={previewingDeploy || !deployForm.command.trim()}
+                  disabled={
+                    previewingDeploy ||
+                    deployForm.method !== 'docker_run' ||
+                    !deployForm.command.trim()
+                  }
                 >
                   <Search size={16} />
                   {previewingDeploy ? 'Previewing...' : 'Preview'}
@@ -2010,6 +2134,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   disabled={
                     deploying ||
                     checkingDeployPermission ||
+                    deployForm.method !== 'docker_run' ||
                     !deployForm.command.trim() ||
                     deployDoctor?.ok === false
                   }

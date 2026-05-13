@@ -115,7 +115,15 @@ export type BackupSnapshot = {
 };
 
 export type DeployPayload = {
-  method: 'docker_run';
+  method:
+    | 'docker_run'
+    | 'docker_compose'
+    | 'github_auto'
+    | 'static_site'
+    | 'node_app'
+    | 'python_app'
+    | 'binary_service'
+    | 'custom_command';
   command: string;
   publishMode: 'reverse_proxy' | 'public_domain_reverse_proxy';
   name?: string;
