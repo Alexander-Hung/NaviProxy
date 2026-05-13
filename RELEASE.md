@@ -44,15 +44,16 @@ During `0.x`, breaking changes may happen, but they must be documented in `CHANG
 5. Update package versions.
 
    ```bash
-   npm version patch --workspaces=false --no-git-tag-version
+   npm version minor --workspaces --include-workspace-root --no-git-tag-version
+   npm install --package-lock-only --ignore-scripts
    ```
 
-   Use `minor` or `major` when appropriate.
+   Use `patch`, `minor`, or `major` when appropriate.
 
 6. Commit the release.
 
    ```bash
-   git add package.json package-lock.json CHANGELOG.md
+   git add -A
    git commit -m "Release vX.Y.Z"
    ```
 

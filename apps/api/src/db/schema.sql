@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS deployment_records (
   provider TEXT NOT NULL CHECK (provider IN ('docker', 'docker_compose')),
   resource_id TEXT NOT NULL,
   resource_name TEXT NOT NULL,
+  deploy_input TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
 );

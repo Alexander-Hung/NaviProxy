@@ -146,6 +146,17 @@ const importSchema = z.object({
     .min(1)
 });
 
+const deploymentBackupSchema = z.array(
+  z.object({
+    appId: z.string().min(1),
+    provider: z.enum(['docker', 'docker_compose']),
+    resourceId: z.string().min(1),
+    resourceName: z.string().min(1),
+    deployInput: z.unknown().nullable().optional(),
+    createdAt: z.string().optional()
+  })
+);
+
 export type AppInput = z.infer<typeof appInputSchema>;
 
 function slugify(value: string) {
@@ -457,6 +468,46 @@ export class AppsService {
     };
   }
 
+  exportDeployments() {
+    const rows = this.db
+      .prepare(
+        `SELECT
+          app_id AS appId,
+          provider,
+          resource_id AS resourceId,
+          resource_name AS resourceName,
+          deploy_input AS deployInput,
+          created_at AS createdAt
+        FROM deployment_records
+        ORDER BY created_at ASC`
+      )
+      .all() as Array<{
+        appId: string;
+        provider: 'docker' | 'docker_compose';
+        resourceId: string;
+        resourceName: string;
+        deployInput: string | null;
+        createdAt: string;
+      }>;
+
+    return rows.map((row) => {
+      let deployInput: unknown | null = null;
+
+      if (row.deployInput) {
+        try {
+          deployInput = JSON.parse(row.deployInput);
+        } catch {
+          deployInput = null;
+        }
+      }
+
+      return {
+        ...row,
+        deployInput
+      };
+    });
+  }
+
   private prepareImportedApps(input: unknown) {
     const parsed = importSchema.parse(input);
     const now = new Date().toISOString();
@@ -498,6 +549,7 @@ export class AppsService {
 
   async restoreBackup(input: {
     apps: unknown[];
+    deployments?: unknown[];
     settings?: unknown;
     settingsService: SettingsService;
     adminTokenConfigured: boolean;
@@ -515,12 +567,17 @@ export class AppsService {
       exportedAt: new Date().toISOString(),
       version: 1,
       apps: this.exportApps().apps,
+      deployments: this.exportDeployments(),
       settings: input.settingsService.getAll()
     };
+    const deployments = input.deployments
+      ? deploymentBackupSchema.parse(input.deployments)
+      : [];
 
     const savedApps = this.db.transaction(() => {
       this.recordBackupSnapshotInCurrentTransaction('pre_restore', snapshot);
       const restoredApps = this.repo.replaceAllInCurrentTransaction(apps);
+      this.replaceDeploymentsInCurrentTransaction(deployments);
       input.settingsService.save(nextSettings);
       this.pruneBackupSnapshotsInCurrentTransaction();
       return restoredApps;
@@ -529,10 +586,44 @@ export class AppsService {
 
     return {
       apps: savedApps,
+      deployments: deployments.length,
       settings: nextSettings,
       snapshot,
       proxySync
     };
+  }
+
+  private replaceDeploymentsInCurrentTransaction(
+    deployments: z.infer<typeof deploymentBackupSchema>
+  ) {
+    this.db.prepare('DELETE FROM deployment_records').run();
+
+    if (deployments.length === 0) {
+      return;
+    }
+
+    const existingAppIds = new Set(
+      (this.db.prepare('SELECT id FROM apps').all() as Array<{ id: string }>).map((row) => row.id)
+    );
+    const insert = this.db.prepare(
+      `INSERT INTO deployment_records (
+        app_id, provider, resource_id, resource_name, deploy_input, created_at
+      ) VALUES (
+        @appId, @provider, @resourceId, @resourceName, @deployInput, @createdAt
+      )`
+    );
+
+    for (const deployment of deployments) {
+      if (!existingAppIds.has(deployment.appId)) {
+        continue;
+      }
+
+      insert.run({
+        ...deployment,
+        deployInput: deployment.deployInput ? JSON.stringify(deployment.deployInput) : null,
+        createdAt: deployment.createdAt ?? new Date().toISOString()
+      });
+    }
   }
 
   recordBackupSnapshot(reason: string, payload: unknown) {

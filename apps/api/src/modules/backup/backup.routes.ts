@@ -13,14 +13,16 @@ export async function registerBackupRoutes(
 ) {
   app.get('/api/backup', async () => ({
     exportedAt: new Date().toISOString(),
-    version: 1,
+    version: 2,
     apps: appsService.exportApps().apps,
+    deployments: appsService.exportDeployments(),
     settings: settingsService.getAll()
   }));
 
   app.post('/api/backup/restore', async (request, reply) => {
     const body = request.body as {
       apps?: unknown[];
+      deployments?: unknown[];
       settings?: unknown;
     };
 
@@ -31,6 +33,7 @@ export async function registerBackupRoutes(
     try {
       const result = await appsService.restoreBackup({
         apps: body.apps,
+        deployments: body.deployments,
         settings: body.settings,
         settingsService,
         adminTokenConfigured: Boolean(config.adminToken)

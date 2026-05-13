@@ -153,7 +153,15 @@ or a wildcard record:
   query, or hash components.
 - Use the Admin page local service scan to discover software already listening
   on the host running The Containers and prefill app targets from those ports.
+- Managed Docker and Docker Compose apps can be started, stopped, restarted,
+  inspected through logs, pulled, redeployed, checked for drift, and repaired
+  from the Admin app details view.
 - Keep Caddy Admin API bound to `127.0.0.1`.
 - If you use port `80` for proxied apps, keep The Containers itself on `3001`.
-- Back up `/opt/the-containers/data/the-containers.sqlite`, or use the admin UI export
-  button to save a JSON copy of configured apps.
+- Back up `/opt/the-containers/data/the-containers.sqlite`, the deployment data
+  under `DEPLOYMENTS_PATH`, and any Docker volumes or bind mount directories used
+  by your apps. The Admin backup export includes app records, settings, managed
+  deployment records, and redeploy metadata, but it does not include container
+  data volumes.
+- See [migration-checklist.md](migration-checklist.md) before moving The
+  Containers to a new host.

@@ -61,6 +61,12 @@ const migrations = [
           ON deployment_records(provider, resource_name);
       `);
     }
+  },
+  {
+    id: '20260513_deployment_records_deploy_input',
+    up(db: Database.Database) {
+      ensureColumn(db, 'deployment_records', 'deploy_input', 'TEXT');
+    }
   }
 ];
 

@@ -18,6 +18,7 @@ test('previews docker run deployment with an allocated host port', async () => {
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -50,6 +51,7 @@ test('previews bind mounts that will be prepared before deploy', async () => {
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -79,6 +81,7 @@ test('parses Windows-style docker bind mounts', async () => {
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -110,6 +113,7 @@ test('previews docker run with combined short publish flags', async () => {
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -135,6 +139,7 @@ test('previews docker run host network without injecting publish flags', async (
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -161,6 +166,7 @@ test('infers app name from image behind a registry port', async () => {
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -184,6 +190,7 @@ test('previews docker compose deployment with managed project metadata', async (
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -219,6 +226,7 @@ test('previews docker compose deployment without ports by inferring and injectin
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -249,6 +257,7 @@ test('previews host-network compose without injecting ports', async () => {
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -289,6 +298,7 @@ test('previews docker compose deployment with long-form ports', async () => {
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -320,6 +330,7 @@ test('previews docker compose with structured YAML ports, expose, and bind mount
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -364,6 +375,7 @@ test('selects the web service from a multi-service compose file', async () => {
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -401,6 +413,7 @@ test('reports compose host permission requirements across services', async () =>
       provider TEXT NOT NULL,
       resource_id TEXT NOT NULL,
       resource_name TEXT NOT NULL,
+      deploy_input TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
   `);

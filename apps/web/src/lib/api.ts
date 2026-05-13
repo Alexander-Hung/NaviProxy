@@ -110,6 +110,7 @@ export type BackupSnapshot = {
     exportedAt: string;
     version: number;
     apps: ContainerApp[];
+    deployments?: DeploymentBackupRecord[];
     settings: ContainerSettings;
   };
 };
@@ -189,12 +190,58 @@ export type DeploymentStatus = {
       };
 };
 
+export type DeploymentBackupRecord = {
+  appId: string;
+  provider: 'docker' | 'docker_compose';
+  resourceId: string;
+  resourceName: string;
+  deployInput: unknown | null;
+  createdAt: string;
+};
+
 export type DeploymentLogs = {
   appId: string;
   provider: 'docker' | 'docker_compose';
   resourceName: string;
   tail: number;
   logs: string;
+};
+
+export type RedeployPreview = {
+  appId: string;
+  provider: 'docker' | 'docker_compose';
+  resourceName: string;
+  canRedeploy: boolean;
+  image: string | null;
+  targetUrl: string | null;
+  hostPort: number | null;
+  containerPort: number | null;
+  composeFilePath: string | null;
+  currentState: string;
+  actions: string[];
+  preserved: string[];
+  removed: string[];
+  warnings: string[];
+};
+
+export type DeploymentDrift = {
+  appId: string;
+  provider: 'docker' | 'docker_compose';
+  resourceName: string;
+  checkedAt: string;
+  status: 'pass' | 'warn' | 'fail';
+  checks: Array<{
+    id: string;
+    label: string;
+    status: 'pass' | 'warn' | 'fail';
+    detail: string;
+  }>;
+  repairs: Array<{
+    id: 'start' | 'redeploy' | 'update_target_from_runtime';
+    label: string;
+    detail: string;
+    severity: 'safe' | 'review';
+  }>;
 };
 
 export type DeployDoctor = {
@@ -414,10 +461,11 @@ export const api = {
       exportedAt: string;
       version: number;
       apps: ContainerApp[];
+      deployments: DeploymentBackupRecord[];
       settings: ContainerSettings;
     }>('/api/backup'),
   restoreBackup: (payload: unknown) =>
-    request<AppListMutationResult & { settings: ContainerSettings }>(
+    request<AppListMutationResult & { settings: ContainerSettings; deployments: number }>(
       '/api/backup/restore',
       {
         method: 'POST',
@@ -444,13 +492,33 @@ export const api = {
     }),
   deploymentStatus: (appId: string) =>
     request<DeploymentStatus>(`/api/deployments/${appId}`),
-  manageDeployment: (appId: string, action: 'start' | 'stop' | 'restart') =>
+  manageDeployment: (
+    appId: string,
+    action: 'start' | 'stop' | 'restart' | 'pull' | 'redeploy'
+  ) =>
     request<DeploymentStatus>(`/api/deployments/${appId}/action`, {
       method: 'POST',
       body: JSON.stringify({ action })
     }),
   deploymentLogs: (appId: string, tail = 200) =>
     request<DeploymentLogs>(`/api/deployments/${appId}/logs?tail=${tail}`),
+  redeployPreview: (appId: string) =>
+    request<RedeployPreview>(`/api/deployments/${appId}/redeploy-preview`),
+  deploymentDrift: (appId: string) =>
+    request<DeploymentDrift>(`/api/deployments/${appId}/drift`),
+  repairDeploymentDrift: (
+    appId: string,
+    action: 'start' | 'redeploy' | 'update_target_from_runtime'
+  ) =>
+    request<{
+      repair: string;
+      app: ContainerApp | null;
+      drift: DeploymentDrift | null;
+      proxySync: ProxySync | null;
+    }>(`/api/deployments/${appId}/drift/repair`, {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    }),
   syncProxy: () =>
     request<ProxySync>('/api/proxy/sync', {
       method: 'POST'

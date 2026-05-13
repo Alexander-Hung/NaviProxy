@@ -40,6 +40,8 @@ const deployInputSchema = z.object({
   enabled: z.boolean().default(true)
 });
 
+type ParsedDeployInput = z.infer<typeof deployInputSchema>;
+
 type PublishedPort = {
   hostPort: number | null;
   containerPort: number;
@@ -75,6 +77,7 @@ type DockerRunPlan = {
   };
   dockerArgs: string[];
   warnings: string[];
+  resolvedDeployInput: ParsedDeployInput;
 };
 
 type DockerInspectPort = Array<{
@@ -85,6 +88,9 @@ type DockerInspectPort = Array<{
 type DockerInspectContainer = {
   Id: string;
   Name: string;
+  Config?: {
+    Image?: string;
+  };
   State?: {
     Running?: boolean;
     Status?: string;
@@ -137,6 +143,20 @@ type DeployDoctorGrantStep = {
   title: string;
   description: string;
   commands: string[];
+};
+
+type DeploymentDriftCheck = {
+  id: string;
+  label: string;
+  status: 'pass' | 'warn' | 'fail';
+  detail: string;
+};
+
+type DeploymentRepairAction = {
+  id: 'start' | 'redeploy' | 'update_target_from_runtime';
+  label: string;
+  detail: string;
+  severity: 'safe' | 'review';
 };
 
 const deployDoctorInputSchema = z.object({
@@ -244,6 +264,55 @@ function commandDetail(error: unknown) {
 
 function isDockerDaemonUnavailable(message: string) {
   return /Cannot connect to the Docker daemon/i.test(message);
+}
+
+function resolvedDeployInput(parsed: ParsedDeployInput, plan: {
+  method: 'docker_run' | 'docker_compose';
+  hostPort: number | null;
+  containerPort: number;
+  appPayload: DockerRunPlan['appPayload'];
+}) {
+  return {
+    ...parsed,
+    method: plan.method,
+    name: plan.appPayload.name,
+    publicHost: plan.appPayload.publicHost,
+    publicPath: plan.appPayload.publicPath,
+    routeMode: plan.appPayload.routeMode,
+    hostPort: plan.hostPort,
+    containerPort: plan.containerPort,
+    category: plan.appPayload.category,
+    tags: plan.appPayload.tags,
+    favorite: plan.appPayload.favorite,
+    enabled: plan.appPayload.enabled
+  };
+}
+
+function targetPort(targetUrl: string) {
+  try {
+    const url = new URL(targetUrl);
+
+    if (url.port) {
+      return Number(url.port);
+    }
+
+    return url.protocol === 'https:' ? 443 : 80;
+  } catch {
+    return null;
+  }
+}
+
+function targetUrlForPort(port: number) {
+  return `http://127.0.0.1:${port}`;
+}
+
+async function fileExists(filePath: string) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function isDockerPermissionDenied(message: string) {
@@ -2573,7 +2642,8 @@ export class DeployService {
           appId: created.app.id,
           provider: plan.method === 'docker_compose' ? 'docker_compose' : 'docker',
           resourceId: containerId,
-          resourceName: plan.containerName
+          resourceName: plan.containerName,
+          deployInput: plan.resolvedDeployInput
         });
       }
     } catch (error) {
@@ -2619,12 +2689,20 @@ export class DeployService {
       return null;
     }
 
+    const publicDeployment = {
+      appId: deployment.appId,
+      provider: deployment.provider,
+      resourceId: deployment.resourceId,
+      resourceName: deployment.resourceName,
+      createdAt: deployment.createdAt
+    };
+
     if (deployment.provider === 'docker_compose') {
       const containers = await listComposeProjectContainers(deployment.resourceName);
       const composeFilePath = path.join(deployment.resourceId, 'compose.yml');
 
       return {
-        ...deployment,
+        ...publicDeployment,
         runtime: {
           kind: 'docker_compose' as const,
           running: containers.length > 0 && containers.some((container) => container.state === 'running'),
@@ -2641,7 +2719,7 @@ export class DeployService {
       const container = await inspectContainer(deployment.resourceName);
 
       return {
-        ...deployment,
+        ...publicDeployment,
         runtime: {
           kind: 'docker' as const,
           running: Boolean(container.State?.Running),
@@ -2658,7 +2736,7 @@ export class DeployService {
       }
 
       return {
-        ...deployment,
+        ...publicDeployment,
         runtime: {
           kind: 'docker' as const,
           running: false,
@@ -2670,11 +2748,77 @@ export class DeployService {
     }
   }
 
-  async manageDeployment(appId: string, action: 'start' | 'stop' | 'restart') {
+  async manageDeployment(appId: string, action: 'start' | 'stop' | 'restart' | 'pull' | 'redeploy') {
     const deployment = this.repo.findByAppId(appId);
 
     if (!deployment) {
       return null;
+    }
+
+    if (action === 'pull') {
+      if (deployment.provider === 'docker_compose') {
+        await runDockerComposeCommand([
+          '-p',
+          deployment.resourceName,
+          '-f',
+          path.join(deployment.resourceId, 'compose.yml'),
+          'pull'
+        ]);
+      } else {
+        const container = await inspectContainer(deployment.resourceName);
+        const image = container.Config?.Image;
+
+        if (!image) {
+          throw new DeployExecutionError(`Could not determine Docker image for ${deployment.resourceName}.`);
+        }
+
+        await runDockerCommand(['pull', image], { timeout: 240_000 });
+      }
+
+      return this.managedDeploymentStatus(appId);
+    }
+
+    if (action === 'redeploy') {
+      if (deployment.provider === 'docker_compose') {
+        await runDockerComposeCommand([
+          '-p',
+          deployment.resourceName,
+          '-f',
+          path.join(deployment.resourceId, 'compose.yml'),
+          'pull'
+        ], { timeout: 240_000 });
+        await runDockerComposeCommand([
+          '-p',
+          deployment.resourceName,
+          '-f',
+          path.join(deployment.resourceId, 'compose.yml'),
+          'up',
+          '-d',
+          '--remove-orphans'
+        ], { timeout: 240_000 });
+        return this.managedDeploymentStatus(appId);
+      }
+
+      if (!deployment.deployInput) {
+        throw new DeployInputError(
+          'This Docker deployment was created before redeploy metadata was saved. Delete and deploy it again to enable redeploy.'
+        );
+      }
+
+      const plan = await this.buildPlan(deployment.deployInput, false);
+      await ensureHostMountsWritable(plan.hostMounts);
+      await runDockerCommand(['pull', plan.image], { timeout: 240_000 });
+      await runDockerCommand(['rm', '-fv', deployment.resourceName]).catch(() => undefined);
+      const { stdout } = await runDockerCommand(plan.dockerArgs, { timeout: 240_000 });
+
+      this.repo.updateRuntime({
+        appId,
+        resourceId: stdout.trim(),
+        resourceName: plan.containerName,
+        deployInput: plan.resolvedDeployInput
+      });
+
+      return this.managedDeploymentStatus(appId);
     }
 
     if (deployment.provider === 'docker_compose') {
@@ -2690,6 +2834,379 @@ export class DeployService {
     }
 
     return this.managedDeploymentStatus(appId);
+  }
+
+  async redeployPreview(appId: string) {
+    const deployment = this.repo.findByAppId(appId);
+
+    if (!deployment) {
+      return null;
+    }
+
+    const warnings: string[] = [];
+    const actions = [
+      'Pull the latest image for the managed deployment.',
+      'Recreate only the managed container or Compose project.',
+      'Keep The Containers app route, public host, and proxy settings.'
+    ];
+
+    if (deployment.provider === 'docker_compose') {
+      const containers = await listComposeProjectContainers(deployment.resourceName);
+
+      return {
+        appId,
+        provider: deployment.provider,
+        resourceName: deployment.resourceName,
+        canRedeploy: true,
+        image: containers.map((container) => container.image).filter(Boolean).join(', ') || 'Defined in Compose file',
+        targetUrl: null,
+        hostPort: null,
+        containerPort: null,
+        composeFilePath: path.join(deployment.resourceId, 'compose.yml'),
+        currentState: containers.length > 0
+          ? `${containers.filter((container) => container.state === 'running').length}/${containers.length} running`
+          : 'missing',
+        actions,
+        preserved: [
+          'Named Docker volumes and bind-mounted data paths are preserved.',
+          'The managed Compose file and project directory are preserved.',
+          'The existing app record and route are preserved.'
+        ],
+        removed: [
+          'Orphaned containers from the same managed Compose project may be removed.',
+          'Images are not deleted.'
+        ],
+        warnings
+      };
+    }
+
+    if (!deployment.deployInput) {
+      return {
+        appId,
+        provider: deployment.provider,
+        resourceName: deployment.resourceName,
+        canRedeploy: false,
+        image: null,
+        targetUrl: null,
+        hostPort: null,
+        containerPort: null,
+        composeFilePath: null,
+        currentState: 'metadata missing',
+        actions: [],
+        preserved: ['The existing app record and route will stay unchanged.'],
+        removed: [],
+        warnings: [
+          'This Docker run deployment was created before redeploy metadata was saved. Delete and deploy it again to enable safe redeploy.'
+        ]
+      };
+    }
+
+    const plan = await this.buildPlan(deployment.deployInput, false);
+    let currentState = 'unknown';
+
+    try {
+      const container = await inspectContainer(deployment.resourceName);
+      currentState = container.State?.Status ?? (container.State?.Running ? 'running' : 'stopped');
+    } catch (error) {
+      const detail = commandDetail(error);
+
+      if (!/No such object|No such container|not found/i.test(detail)) {
+        throw error;
+      }
+
+      currentState = 'missing';
+      warnings.push('The current container is missing. Redeploy will create it again from saved settings.');
+    }
+
+    return {
+      appId,
+      provider: deployment.provider,
+      resourceName: deployment.resourceName,
+      canRedeploy: true,
+      image: plan.image,
+      targetUrl: plan.targetUrl,
+      hostPort: plan.hostPort,
+      containerPort: plan.containerPort,
+      composeFilePath: null,
+      currentState,
+      actions: [
+        ...actions,
+        `Recreate Docker container ${plan.containerName}.`
+      ],
+      preserved: [
+        'Bind-mounted host paths and named Docker volumes are preserved.',
+        'The existing app record and route are preserved.',
+        `The same published port ${plan.hostPort ?? plan.containerPort} is reused.`
+      ],
+      removed: [
+        `The old managed container ${deployment.resourceName} is removed before recreation.`,
+        'Images and bind-mounted data are not deleted.'
+      ],
+      warnings: [
+        ...warnings,
+        ...plan.warnings.filter((warning) => !/will bind|requires DNS/i.test(warning))
+      ]
+    };
+  }
+
+  async deploymentDrift(appId: string) {
+    const app = this.appsService.findById(appId);
+    const deployment = this.repo.findByAppId(appId);
+
+    if (!deployment || !app) {
+      return null;
+    }
+
+    const checks: DeploymentDriftCheck[] = [
+      {
+        id: 'managed-record',
+        label: 'Managed record',
+        status: 'pass',
+        detail: `The app is linked to ${deployment.resourceName}.`
+      }
+    ];
+    const repairs: DeploymentRepairAction[] = [];
+
+    if (deployment.provider === 'docker_compose') {
+      const composeFilePath = path.join(deployment.resourceId, 'compose.yml');
+      const composeExists = await fileExists(composeFilePath);
+      const containers = await listComposeProjectContainers(deployment.resourceName);
+      const running = containers.filter((container) => container.state === 'running').length;
+
+      checks.push({
+        id: 'compose-file',
+        label: 'Compose file',
+        status: composeExists ? 'pass' : 'fail',
+        detail: composeExists
+          ? composeFilePath
+          : `Managed Compose file is missing at ${composeFilePath}.`
+      });
+      checks.push({
+        id: 'compose-containers',
+        label: 'Compose containers',
+        status: containers.length === 0 ? 'fail' : running > 0 ? 'pass' : 'warn',
+        detail: containers.length === 0
+          ? 'No containers were found for this managed Compose project.'
+          : `${running}/${containers.length} containers are running.`
+      });
+      if (containers.length === 0) {
+        repairs.push({
+          id: 'redeploy',
+          label: 'Redeploy Compose project',
+          detail: 'Recreate the missing managed Compose project from the saved Compose file.',
+          severity: 'review'
+        });
+      } else if (running === 0) {
+        repairs.push({
+          id: 'start',
+          label: 'Start Compose project',
+          detail: 'Start the managed Compose project without changing images or routes.',
+          severity: 'safe'
+        });
+      }
+
+      const expectedPort =
+        deployment.deployInput && typeof deployment.deployInput === 'object' && 'hostPort' in deployment.deployInput
+          ? (deployment.deployInput as { hostPort?: unknown }).hostPort
+          : null;
+      const appPort = targetPort(app.targetUrl);
+
+      if (typeof expectedPort === 'number' && appPort !== expectedPort) {
+        checks.push({
+          id: 'target-port',
+          label: 'Target port',
+          status: 'warn',
+          detail: `App target uses port ${appPort ?? 'unknown'}, but deployment metadata expects ${expectedPort}.`
+        });
+        repairs.push({
+          id: 'update_target_from_runtime',
+          label: 'Update app target',
+          detail: `Update the app target to ${targetUrlForPort(expectedPort)}.`,
+          severity: 'safe'
+        });
+      } else if (appPort) {
+        checks.push({
+          id: 'target-port',
+          label: 'Target port',
+          status: 'pass',
+          detail: `App target is ${app.targetUrl}.`
+        });
+      }
+    } else {
+      let container: DockerInspectContainer | null = null;
+
+      try {
+        container = await inspectContainer(deployment.resourceName);
+      } catch (error) {
+        const detail = commandDetail(error);
+
+        if (!/No such object|No such container|not found/i.test(detail)) {
+          throw error;
+        }
+      }
+
+      checks.push({
+        id: 'container',
+        label: 'Container',
+        status: container ? 'pass' : 'fail',
+        detail: container
+          ? `${container.Name.replace(/^\//, '')} exists.`
+          : `Container ${deployment.resourceName} was not found.`
+      });
+      if (!container && deployment.deployInput) {
+        repairs.push({
+          id: 'redeploy',
+          label: 'Recreate container',
+          detail: 'Recreate the missing managed container from saved deployment metadata.',
+          severity: 'review'
+        });
+      }
+
+      if (container) {
+        checks.push({
+          id: 'container-state',
+          label: 'Container state',
+          status: container.State?.Running ? 'pass' : 'warn',
+          detail: container.State?.Status ?? (container.State?.Running ? 'running' : 'stopped')
+        });
+        if (!container.State?.Running) {
+          repairs.push({
+            id: 'start',
+            label: 'Start container',
+            detail: 'Start the stopped managed container.',
+            severity: 'safe'
+          });
+        }
+      }
+
+      if (!deployment.deployInput) {
+        checks.push({
+          id: 'redeploy-metadata',
+          label: 'Redeploy metadata',
+          status: 'warn',
+          detail: 'This Docker run deployment is missing saved metadata, so safe redeploy is disabled.'
+        });
+      } else {
+        const plan = await this.buildPlan(deployment.deployInput, false);
+        const appPort = targetPort(app.targetUrl);
+        const publishedPort = container
+          ? firstPublishedPort(container, plan.containerPort)
+          : null;
+
+        checks.push({
+          id: 'redeploy-metadata',
+          label: 'Redeploy metadata',
+          status: 'pass',
+          detail: `Saved redeploy metadata points to ${plan.image}.`
+        });
+        checks.push({
+          id: 'target-port',
+          label: 'Target port',
+          status:
+            appPort === (plan.hostPort ?? plan.containerPort) &&
+            (!publishedPort || publishedPort === appPort)
+              ? 'pass'
+              : 'warn',
+          detail: `App target ${app.targetUrl}; saved port ${plan.hostPort ?? plan.containerPort}; runtime port ${publishedPort ?? 'unknown'}.`
+        });
+        if (appPort !== (publishedPort ?? plan.hostPort ?? plan.containerPort)) {
+          const repairPort = publishedPort ?? plan.hostPort ?? plan.containerPort;
+          repairs.push({
+            id: 'update_target_from_runtime',
+            label: 'Update app target',
+            detail: `Update the app target to ${targetUrlForPort(repairPort)}.`,
+            severity: 'safe'
+          });
+        }
+      }
+    }
+
+    const status = checks.some((check) => check.status === 'fail')
+      ? 'fail'
+      : checks.some((check) => check.status === 'warn')
+        ? 'warn'
+        : 'pass';
+
+    return {
+      appId,
+      provider: deployment.provider,
+      resourceName: deployment.resourceName,
+      checkedAt: new Date().toISOString(),
+      status,
+      checks,
+      repairs
+    };
+  }
+
+  async repairDeploymentDrift(
+    appId: string,
+    action: 'start' | 'redeploy' | 'update_target_from_runtime'
+  ) {
+    const app = this.appsService.findById(appId);
+    const deployment = this.repo.findByAppId(appId);
+
+    if (!deployment || !app) {
+      return null;
+    }
+
+    if (action === 'start' || action === 'redeploy') {
+      await this.manageDeployment(appId, action);
+      return {
+        repair: action,
+        app: this.appsService.findById(appId),
+        drift: await this.deploymentDrift(appId),
+        proxySync: null
+      };
+    }
+
+    let port: number | null = null;
+
+    if (deployment.provider === 'docker_compose') {
+      if (
+        deployment.deployInput &&
+        typeof deployment.deployInput === 'object' &&
+        'hostPort' in deployment.deployInput &&
+        typeof (deployment.deployInput as { hostPort?: unknown }).hostPort === 'number'
+      ) {
+        port = (deployment.deployInput as { hostPort: number }).hostPort;
+      }
+    } else {
+      const container = await inspectContainer(deployment.resourceName);
+
+      if (deployment.deployInput) {
+        const plan = await this.buildPlan(deployment.deployInput, false);
+        port = firstPublishedPort(container, plan.containerPort) ?? plan.hostPort ?? plan.containerPort;
+      } else {
+        port = firstPublishedPort(container, 80);
+      }
+    }
+
+    if (!port) {
+      throw new DeployInputError('No runtime port could be found for this deployment.');
+    }
+
+    const updated = await this.appsService.update(appId, {
+      name: app.name,
+      slug: app.slug,
+      iconType: app.iconType,
+      iconValue: app.iconValue,
+      targetUrl: targetUrlForPort(port),
+      routeMode: app.routeMode,
+      publicHost: app.publicHost,
+      publicPath: app.publicPath,
+      enabled: app.enabled,
+      sortOrder: app.sortOrder,
+      category: app.category,
+      tags: app.tags,
+      favorite: app.favorite
+    });
+
+    return {
+      repair: action,
+      app: updated?.app ?? null,
+      drift: await this.deploymentDrift(appId),
+      proxySync: updated?.proxySync ?? null
+    };
   }
 
   async deploymentLogs(appId: string, tail = 200) {
@@ -2857,6 +3374,12 @@ export class DeployService {
       hostMounts: dockerRun.hostMounts,
       appPayload,
       dockerArgs,
+      resolvedDeployInput: resolvedDeployInput(parsed, {
+        method: 'docker_run',
+        hostPort,
+        containerPort,
+        appPayload
+      }),
       warnings: [
         ...warnings,
         ...(hostPort
@@ -2973,6 +3496,12 @@ export class DeployService {
       composeContent,
       appPayload,
       dockerArgs,
+      resolvedDeployInput: resolvedDeployInput(parsed, {
+        method: 'docker_compose',
+        hostPort,
+        containerPort,
+        appPayload
+      }),
       warnings: [
         ...warnings,
         'The Containers will write this Compose file into its managed deployments directory.',

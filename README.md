@@ -18,6 +18,10 @@ Available now:
 - Docker Compose deployments with YAML parsing, web service selection, port inference, bind mount checks, host network handling, and managed cleanup.
 - Host permission panel for Docker CLI, Docker daemon, Compose runtime, bind mounts, privileged containers, capabilities, devices, host networking, Docker socket mounts, public domain DNS, and Caddy sync.
 - Managed deployment records. Apps deployed by The Containers are marked as managed and are cleaned up when deleted.
+- Managed deployment controls for start, stop, restart, logs, image pull, redeploy, and redeploy safety preview.
+- Deployment drift checks for missing containers, stopped containers, missing Compose files, port mismatches, and missing redeploy metadata.
+- Drift repair actions for starting stopped deployments, redeploying missing resources, and updating app targets from runtime ports.
+- Backup and restore for apps, settings, managed deployment records, and redeploy metadata.
 
 Planned:
 
@@ -111,6 +115,30 @@ The deploy flow is:
 
 When a managed app is deleted, The Containers attempts to remove the related Docker container or Compose project and free the route.
 
+## Managed Deployment Operations
+
+Apps deployed by The Containers receive a `Self-Host` badge and a managed deployment record. From the Admin app details view, managed apps can be:
+
+- Started, stopped, and restarted.
+- Inspected with runtime status and Compose container details.
+- Viewed through recent Docker or Docker Compose logs.
+- Updated with image pull.
+- Redeployed from saved deployment metadata.
+- Checked for deployment drift.
+- Repaired when a safe repair action is available.
+
+Redeploy preview shows what will be pulled, recreated, preserved, and removed before the action runs. Docker run redeploy requires saved metadata, so older deployments may need to be deleted and deployed again once before safe redeploy is available.
+
+Deployment drift checks can detect:
+
+- Missing Docker containers or Compose project containers.
+- Stopped managed deployments.
+- Missing managed Compose files.
+- App target ports that no longer match saved deployment metadata or runtime ports.
+- Docker run deployments that are missing redeploy metadata.
+
+Backup exports include apps, settings, managed deployment records, and redeploy metadata. See [docs/migration-checklist.md](docs/migration-checklist.md) before moving The Containers to a new host.
+
 ## Important Safety Model
 
 The Containers automates common deployment work, but it does not bypass operating system permissions.
@@ -123,6 +151,8 @@ It can automatically:
 - Call Docker and Docker Compose.
 - Sync Caddy routes.
 - Remove managed containers or Compose projects.
+- Start, stop, restart, pull, and redeploy managed deployments.
+- Export and restore managed deployment metadata.
 
 It will not silently:
 
@@ -132,6 +162,7 @@ It will not silently:
 - Change public DNS records.
 - Expose Caddy Admin API to the public internet.
 - Override protected host paths without user action.
+- Guarantee that app data exists on a new host after restore. Docker volumes and bind mount directories must be backed up or migrated separately.
 
 Host permission checks are shown before deploy so users can see what is ready, what The Containers can handle, and what needs manual host authorization.
 

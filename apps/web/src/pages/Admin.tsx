@@ -33,6 +33,7 @@ import {
   type DeployPayload,
   type DeployPlan,
   type DeployResult,
+  type DeploymentDrift,
   type DeploymentLogs,
   type DeploymentStatus,
   type DnsDiagnostic,
@@ -42,6 +43,7 @@ import {
   type ProxyDiagnostics,
   type ProxyHistoryItem,
   type ProxySync,
+  type RedeployPreview,
   type RouteMode
 } from '../lib/api';
 
@@ -819,9 +821,14 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   const [detailAppId, setDetailAppId] = useState<string | null>(null);
   const [detailHistory, setDetailHistory] = useState<AppStatus[]>([]);
   const [deploymentStatus, setDeploymentStatus] = useState<DeploymentStatus | null>(null);
+  const [deploymentDrift, setDeploymentDrift] = useState<DeploymentDrift | null>(null);
   const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLogs | null>(null);
-  const [deploymentAction, setDeploymentAction] = useState<'start' | 'stop' | 'restart' | null>(null);
+  const [redeployPreview, setRedeployPreview] = useState<RedeployPreview | null>(null);
+  const [deploymentAction, setDeploymentAction] = useState<'start' | 'stop' | 'restart' | 'pull' | 'redeploy' | null>(null);
   const [loadingDeploymentLogs, setLoadingDeploymentLogs] = useState(false);
+  const [checkingDeploymentDrift, setCheckingDeploymentDrift] = useState(false);
+  const [repairingDeploymentDrift, setRepairingDeploymentDrift] = useState<string | null>(null);
+  const [loadingRedeployPreview, setLoadingRedeployPreview] = useState(false);
   const [appSearch, setAppSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [favoriteOnly, setFavoriteOnly] = useState(false);
@@ -1242,7 +1249,9 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     setDetailAppId(app.id);
     setDetailHistory([]);
     setDeploymentStatus(null);
+    setDeploymentDrift(null);
     setDeploymentLogs(null);
+    setRedeployPreview(null);
     void api
       .appHealthHistory(app.id)
       .then(setDetailHistory)
@@ -1252,10 +1261,78 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
         .deploymentStatus(app.id)
         .then(setDeploymentStatus)
         .catch(() => setDeploymentStatus(null));
+      void api
+        .deploymentDrift(app.id)
+        .then(setDeploymentDrift)
+        .catch(() => setDeploymentDrift(null));
     }
   }
 
-  async function runDeploymentAction(action: 'start' | 'stop' | 'restart') {
+  async function checkDeploymentDrift() {
+    if (!detailApp) {
+      return;
+    }
+
+    setCheckingDeploymentDrift(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const [status, drift] = await Promise.all([
+        api.deploymentStatus(detailApp.id),
+        api.deploymentDrift(detailApp.id)
+      ]);
+      setDeploymentStatus(status);
+      setDeploymentDrift(drift);
+      setMessage(
+        drift.status === 'pass'
+          ? 'Deployment drift check passed.'
+          : drift.status === 'warn'
+            ? 'Deployment drift check completed with warnings.'
+            : 'Deployment drift check found a problem.'
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCheckingDeploymentDrift(false);
+    }
+  }
+
+  async function repairDeploymentDrift(
+    action: 'start' | 'redeploy' | 'update_target_from_runtime'
+  ) {
+    if (!detailApp) {
+      return;
+    }
+
+    if (action === 'redeploy' && !window.confirm('Redeploy this app to repair drift?')) {
+      return;
+    }
+
+    setRepairingDeploymentDrift(action);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const result = await api.repairDeploymentDrift(detailApp.id, action);
+      if (result.drift) {
+        setDeploymentDrift(result.drift);
+      }
+      setMessage(
+        result.proxySync
+          ? `${proxySyncMessage(result.proxySync)} Deployment repair completed.`
+          : 'Deployment repair completed.'
+      );
+      await load();
+      setDeploymentStatus(await api.deploymentStatus(detailApp.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRepairingDeploymentDrift(null);
+    }
+  }
+
+  async function runDeploymentAction(action: 'start' | 'stop' | 'restart' | 'pull' | 'redeploy') {
     if (!detailApp) {
       return;
     }
@@ -1291,6 +1368,24 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoadingDeploymentLogs(false);
+    }
+  }
+
+  async function openRedeployPreview() {
+    if (!detailApp) {
+      return;
+    }
+
+    setLoadingRedeployPreview(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      setRedeployPreview(await api.redeployPreview(detailApp.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingRedeployPreview(false);
     }
   }
 
@@ -1468,7 +1563,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
       return;
     }
 
-    if (!window.confirm('Restoring a backup will replace apps and settings. Continue?')) {
+    if (!window.confirm('Restoring a backup will replace apps, settings, and managed deployment records. Continue?')) {
       return;
     }
 
@@ -1476,7 +1571,9 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
       const result = await api.restoreBackup(JSON.parse(await file.text()));
       setApps(result.apps);
       setSettings(result.settings);
-      setMessage(`${proxySyncMessage(result.proxySync)} A pre-restore snapshot was saved.`);
+      setMessage(
+        `${proxySyncMessage(result.proxySync)} Restored ${result.deployments} managed deployment records. A pre-restore snapshot was saved.`
+      );
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -2143,12 +2240,56 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   <div className="flex flex-wrap gap-2">
                     <button
                       className="btn-secondary h-9"
+                      onClick={() => void checkDeploymentDrift()}
+                      disabled={checkingDeploymentDrift}
+                      title="Check deployment drift"
+                    >
+                      <Shield
+                        size={15}
+                        className={checkingDeploymentDrift ? 'animate-pulse' : ''}
+                      />
+                      {checkingDeploymentDrift ? 'Checking' : 'Check'}
+                    </button>
+                    <button
+                      className="btn-secondary h-9"
                       onClick={() => void viewDeploymentLogs()}
                       disabled={loadingDeploymentLogs}
                       title="View deployment logs"
                     >
                       <Terminal size={15} />
                       {loadingDeploymentLogs ? 'Loading' : 'Logs'}
+                    </button>
+                    <button
+                      className="btn-secondary h-9"
+                      onClick={() => void runDeploymentAction('pull')}
+                      disabled={Boolean(deploymentAction)}
+                      title="Pull latest image"
+                    >
+                      <Download
+                        size={15}
+                        className={deploymentAction === 'pull' ? 'animate-pulse' : ''}
+                      />
+                      {deploymentAction === 'pull' ? 'Pulling' : 'Pull'}
+                    </button>
+                    <button
+                      className="btn-secondary h-9"
+                      onClick={() => void openRedeployPreview()}
+                      disabled={Boolean(deploymentAction) || loadingRedeployPreview}
+                      title="Pull latest image and recreate deployment"
+                    >
+                      <RefreshCw
+                        size={15}
+                        className={
+                          deploymentAction === 'redeploy' || loadingRedeployPreview
+                            ? 'animate-spin'
+                            : ''
+                        }
+                      />
+                      {deploymentAction === 'redeploy'
+                        ? 'Redeploying'
+                        : loadingRedeployPreview
+                          ? 'Checking'
+                          : 'Redeploy'}
                     </button>
                     <button
                       className="btn-secondary h-9"
@@ -2182,6 +2323,86 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                     </button>
                   </div>
                 </div>
+                {deploymentDrift ? (
+                  <div className="mt-3 rounded border border-black/10 bg-black/[0.02] p-3 dark:border-white/15 dark:bg-white/[0.03]">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-semibold">Deployment drift</div>
+                      <span
+                        className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                          deploymentDrift.status === 'pass'
+                            ? 'bg-spruce/10 text-spruce dark:bg-[#8fe0ce]/10 dark:text-[#9be8d7]'
+                            : deploymentDrift.status === 'warn'
+                              ? 'bg-amber/10 text-amber'
+                              : 'bg-coral/10 text-coral dark:bg-[#ff9b8c]/10 dark:text-[#ffb1a5]'
+                        }`}
+                      >
+                        {deploymentDrift.status}
+                      </span>
+                    </div>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {deploymentDrift.checks.map((check) => (
+                        <div
+                          key={check.id}
+                          className="rounded border border-black/10 p-2 text-xs dark:border-white/15"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold">{check.label}</span>
+                            <span
+                              className={
+                                check.status === 'pass'
+                                  ? 'text-spruce dark:text-[#9be8d7]'
+                                  : check.status === 'warn'
+                                    ? 'text-amber'
+                                    : 'text-coral dark:text-[#ff9b8c]'
+                              }
+                            >
+                              {check.status}
+                            </span>
+                          </div>
+                          <div className="mt-1 break-all text-black/55 dark:text-[#b8c7c1]">
+                            {check.detail}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {deploymentDrift.repairs.length > 0 ? (
+                      <div className="mt-3 rounded border border-black/10 bg-white/70 p-3 dark:border-white/15 dark:bg-white/[0.04]">
+                        <div className="mb-2 font-semibold">Repair actions</div>
+                        <div className="flex flex-wrap gap-2">
+                          {deploymentDrift.repairs.map((repair) => (
+                            <button
+                              key={repair.id}
+                              className="btn-secondary h-9"
+                              type="button"
+                              onClick={() => void repairDeploymentDrift(repair.id)}
+                              disabled={Boolean(repairingDeploymentDrift)}
+                              title={repair.detail}
+                            >
+                              {repair.id === 'start' ? (
+                                <Rocket size={15} />
+                              ) : repair.id === 'redeploy' ? (
+                                <RefreshCw
+                                  size={15}
+                                  className={
+                                    repairingDeploymentDrift === repair.id ? 'animate-spin' : ''
+                                  }
+                                />
+                              ) : (
+                                <Save size={15} />
+                              )}
+                              {repairingDeploymentDrift === repair.id
+                                ? 'Repairing'
+                                : repair.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    <div className="mt-2 text-xs text-black/45 dark:text-[#9fb0aa]">
+                      Checked {new Date(deploymentDrift.checkedAt).toLocaleString()}
+                    </div>
+                  </div>
+                ) : null}
                 {deploymentStatus?.runtime.kind === 'docker_compose' &&
                 deploymentStatus.runtime.containers.length > 0 ? (
                   <div className="mt-3 grid gap-2 md:grid-cols-2">
@@ -2744,6 +2965,140 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
               <pre className="min-h-[280px] overflow-auto rounded bg-[#101715] p-3 text-xs leading-relaxed text-[#d9eee7]">
                 {deploymentLogs.logs || 'No logs returned.'}
               </pre>
+            </section>
+          </div>
+        ) : null}
+
+        {redeployPreview ? (
+          <div
+            className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4 backdrop-blur-sm"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setRedeployPreview(null);
+              }
+            }}
+          >
+            <section
+              className="panel max-h-[min(760px,calc(100vh-2rem))] w-full max-w-3xl overflow-auto p-4 shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="redeployPreviewTitle"
+            >
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-black/45 dark:text-[#a9bbb4]">
+                    Redeploy preview
+                  </p>
+                  <h3 id="redeployPreviewTitle" className="mt-1 text-lg font-semibold">
+                    {redeployPreview.resourceName}
+                  </h3>
+                  <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
+                    {redeployPreview.provider === 'docker_compose' ? 'Docker Compose' : 'Docker'} · {redeployPreview.currentState}
+                  </p>
+                </div>
+                <button
+                  className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-black/5 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+                  onClick={() => setRedeployPreview(null)}
+                  title="Close redeploy preview"
+                  aria-label="Close redeploy preview"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+
+              <div className="grid gap-3 text-sm md:grid-cols-2">
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Image</div>
+                  <div className="break-all font-semibold">
+                    {redeployPreview.image ?? 'Unavailable'}
+                  </div>
+                </div>
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Target</div>
+                  <div className="break-all font-semibold">
+                    {redeployPreview.targetUrl ??
+                      redeployPreview.composeFilePath ??
+                      'Managed deployment'}
+                  </div>
+                </div>
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Port</div>
+                  <div className="font-semibold">
+                    {redeployPreview.hostPort && redeployPreview.containerPort
+                      ? `${redeployPreview.hostPort}:${redeployPreview.containerPort}`
+                      : 'Defined by Compose or host network'}
+                  </div>
+                </div>
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Result</div>
+                  <div className={redeployPreview.canRedeploy ? 'font-semibold text-spruce dark:text-[#9be8d7]' : 'font-semibold text-coral dark:text-[#ff9b8c]'}>
+                    {redeployPreview.canRedeploy ? 'Ready to redeploy' : 'Redeploy unavailable'}
+                  </div>
+                </div>
+              </div>
+
+              {redeployPreview.warnings.length > 0 ? (
+                <div className="mt-3 rounded border border-amber/30 bg-amber/10 p-3 text-sm text-amber">
+                  {redeployPreview.warnings.join(' ')}
+                </div>
+              ) : null}
+
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Actions</div>
+                  <ul className="space-y-1 text-xs text-black/60 dark:text-[#b8c7c1]">
+                    {redeployPreview.actions.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Preserved</div>
+                  <ul className="space-y-1 text-xs text-black/60 dark:text-[#b8c7c1]">
+                    {redeployPreview.preserved.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Removed</div>
+                  <ul className="space-y-1 text-xs text-black/60 dark:text-[#b8c7c1]">
+                    {redeployPreview.removed.length > 0 ? (
+                      redeployPreview.removed.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))
+                    ) : (
+                      <li>Nothing is removed by preview.</li>
+                    )}
+                  </ul>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                <button
+                  className="btn-secondary h-10"
+                  type="button"
+                  onClick={() => setRedeployPreview(null)}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded bg-spruce px-3 text-sm font-semibold text-white transition hover:bg-[#11564a] disabled:opacity-60"
+                  type="button"
+                  disabled={!redeployPreview.canRedeploy || Boolean(deploymentAction)}
+                  onClick={() => {
+                    setRedeployPreview(null);
+                    void runDeploymentAction('redeploy');
+                  }}
+                >
+                  <RefreshCw
+                    size={16}
+                    className={deploymentAction === 'redeploy' ? 'animate-spin' : ''}
+                  />
+                  {deploymentAction === 'redeploy' ? 'Redeploying' : 'Redeploy'}
+                </button>
+              </div>
             </section>
           </div>
         ) : null}

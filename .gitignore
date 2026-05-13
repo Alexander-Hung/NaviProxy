@@ -12,3 +12,4 @@ coverage/
 # Private local docs and planning notes. Public project docs must stay in English.
 docs/*.md
 !docs/deploy-linux.md
+!docs/migration-checklist.md
