@@ -7,6 +7,7 @@ import {
   Info,
   Pencil,
   Route,
+  Server,
   Trash2,
   XCircle
 } from 'lucide-react';
@@ -124,8 +125,14 @@ export function AppCard({
 
       <div>
         <h2 className="mt-4 truncate text-lg font-semibold">{app.name}</h2>
-        {(app.favorite || app.category || app.tags.length > 0) ? (
+        {(app.managedDeployment || app.favorite || app.category || app.tags.length > 0) ? (
           <div className="mt-2 flex flex-wrap gap-1">
+            {app.managedDeployment ? (
+              <span className="inline-flex items-center gap-1 rounded bg-ink px-2 py-0.5 text-xs font-semibold text-white dark:bg-[#dff3ec] dark:text-[#0f1714]">
+                <Server size={12} />
+                Self-Host
+              </span>
+            ) : null}
             {app.favorite ? (
               <span className="rounded bg-amber/15 px-2 py-0.5 text-xs font-semibold text-amber">
                 Favorite

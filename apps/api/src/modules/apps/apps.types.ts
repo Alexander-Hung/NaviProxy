@@ -16,6 +16,7 @@ export type AppRecord = {
   category: string | null;
   tags: string[];
   favorite: boolean;
+  managedDeployment: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -35,6 +36,7 @@ export type AppRow = {
   category: string | null;
   tags: string;
   favorite: number;
+  managed_deployment?: number;
   created_at: string;
   updated_at: string;
 };

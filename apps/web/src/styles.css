@@ -19,7 +19,8 @@ html.dark {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 

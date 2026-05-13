@@ -18,6 +18,7 @@ const baseApp: AppRecord = {
   category: 'Media',
   tags: ['video'],
   favorite: true,
+  managedDeployment: false,
   createdAt: new Date(0).toISOString(),
   updatedAt: new Date(0).toISOString()
 };

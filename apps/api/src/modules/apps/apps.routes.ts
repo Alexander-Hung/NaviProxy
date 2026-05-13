@@ -2,6 +2,11 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { ZodError } from 'zod';
 import { config } from '../../config.js';
 import type { AuditService } from '../audit/audit.service.js';
+import {
+  DeployExecutionError,
+  DeployRuntimeUnavailableError,
+  type DeployService
+} from '../deploy/deploy.service.js';
 import { AppConflictError, type AppsService } from './apps.service.js';
 
 function handleAppError(error: unknown, reply: FastifyReply) {
@@ -13,13 +18,22 @@ function handleAppError(error: unknown, reply: FastifyReply) {
     return reply.code(409).send({ message: error.message });
   }
 
+  if (error instanceof DeployRuntimeUnavailableError) {
+    return reply.code(503).send({ message: error.message });
+  }
+
+  if (error instanceof DeployExecutionError) {
+    return reply.code(502).send({ message: error.message });
+  }
+
   throw error;
 }
 
 export async function registerAppsRoutes(
   app: FastifyInstance,
   appsService: AppsService,
-  auditService: AuditService
+  auditService: AuditService,
+  deployService?: DeployService
 ) {
   app.get('/api/health', async () => ({
     ok: true,
@@ -123,6 +137,20 @@ export async function registerAppsRoutes(
 
   app.delete('/api/apps/:id', async (request, reply) => {
     const { id } = request.params as { id: string };
+    const existing = appsService.findById(id);
+
+    if (!existing) {
+      return reply.code(404).send({ message: 'App not found' });
+    }
+
+    let deploymentDeleted = null;
+
+    try {
+      deploymentDeleted = await deployService?.deleteManagedDeployment(id) ?? null;
+    } catch (error) {
+      return handleAppError(error, reply);
+    }
+
     const result = await appsService.delete(id);
 
     if (!result.deleted) {
@@ -136,6 +164,21 @@ export async function registerAppsRoutes(
       summary: `Deleted app ${id}`,
       sourceIp: request.ip
     });
-    return { ok: true, proxySync: result.proxySync };
+
+    if (deploymentDeleted) {
+      auditService.record({
+        action: 'deploy.delete',
+        targetType: 'deployment',
+        targetId: id,
+        summary: `Deleted ${deploymentDeleted.resourceName}`,
+        sourceIp: request.ip
+      });
+    }
+
+    return {
+      ok: true,
+      proxySync: result.proxySync,
+      deployment: deploymentDeleted
+    };
   });
 }

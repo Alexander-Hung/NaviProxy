@@ -25,6 +25,18 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
   applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS deployment_records (
+  app_id TEXT PRIMARY KEY,
+  provider TEXT NOT NULL CHECK (provider IN ('docker')),
+  resource_id TEXT NOT NULL,
+  resource_name TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_deployment_records_provider_resource
+  ON deployment_records(provider, resource_name);
+
 CREATE TABLE IF NOT EXISTS proxy_config_versions (
   id TEXT PRIMARY KEY,
   caddy_config_hash TEXT NOT NULL,

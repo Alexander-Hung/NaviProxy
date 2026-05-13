@@ -209,6 +209,10 @@ export class AppsService {
     return this.repo.findAll();
   }
 
+  findById(id: string) {
+    return this.repo.findById(id);
+  }
+
   private ensureNoConflict(app: AppRecord, existingId?: string) {
     const slugMatch = this.repo.findBySlug(app.slug);
 
@@ -285,6 +289,7 @@ export class AppsService {
       category: normalized.category ?? null,
       tags: normalized.tags,
       favorite: normalized.favorite,
+      managedDeployment: false,
       createdAt: now,
       updatedAt: now
     };
@@ -293,6 +298,33 @@ export class AppsService {
     const created = this.db.transaction(() => this.repo.create(app))();
     const proxySync = await this.proxyService.syncSafely();
     return { app: created, proxySync };
+  }
+
+  validateCreate(input: unknown) {
+    const normalized = normalizeAppInput(input);
+    const now = new Date().toISOString();
+    const app: AppRecord = {
+      id: nanoid(),
+      name: normalized.name,
+      slug: normalized.slug || slugify(normalized.name),
+      iconType: normalized.iconType,
+      iconValue: normalized.iconValue ?? null,
+      targetUrl: normalized.targetUrl,
+      routeMode: normalized.routeMode,
+      publicHost: normalized.publicHost,
+      publicPath: normalized.publicPath ?? null,
+      enabled: normalized.enabled,
+      sortOrder: normalized.sortOrder,
+      category: normalized.category ?? null,
+      tags: normalized.tags,
+      favorite: normalized.favorite,
+      managedDeployment: false,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    this.ensureNoConflict(app);
+    return app;
   }
 
   async update(id: string, input: unknown) {
@@ -317,6 +349,7 @@ export class AppsService {
       category: normalized.category ?? null,
       tags: normalized.tags,
       favorite: normalized.favorite,
+      managedDeployment: existing.managedDeployment,
       createdAt: existing.createdAt,
       updatedAt: existing.updatedAt
     };
@@ -445,6 +478,7 @@ export class AppsService {
         category: normalized.category ?? null,
         tags: normalized.tags,
         favorite: normalized.favorite,
+        managedDeployment: false,
         createdAt: now,
         updatedAt: now
       };

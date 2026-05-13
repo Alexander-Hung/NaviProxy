@@ -16,6 +16,24 @@ const migrations = [
         CREATE INDEX IF NOT EXISTS idx_apps_favorite ON apps(favorite);
       `);
     }
+  },
+  {
+    id: '20260512_deployment_records',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deployment_records (
+          app_id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL CHECK (provider IN ('docker')),
+          resource_id TEXT NOT NULL,
+          resource_name TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_deployment_records_provider_resource
+          ON deployment_records(provider, resource_name);
+      `);
+    }
   }
 ];
 

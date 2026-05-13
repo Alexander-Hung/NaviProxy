@@ -16,6 +16,7 @@ export type NaviApp = {
   category: string | null;
   tags: string[];
   favorite: boolean;
+  managedDeployment: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -111,6 +112,70 @@ export type BackupSnapshot = {
     apps: NaviApp[];
     settings: NaviSettings;
   };
+};
+
+export type DeployPayload = {
+  method: 'docker_run';
+  command: string;
+  publishMode: 'reverse_proxy' | 'public_domain_reverse_proxy';
+  name?: string;
+  publicHost: string;
+  routeMode: RouteMode;
+  publicPath: string | null;
+  hostPort?: number | null;
+  containerPort?: number | null;
+  category: string | null;
+  tags: string[];
+  favorite: boolean;
+  enabled: boolean;
+};
+
+export type DeployPlan = {
+  containerName: string;
+  image: string;
+  publishMode: DeployPayload['publishMode'];
+  hostPort: number | null;
+  containerPort: number;
+  protocol: string;
+  targetUrl: string;
+  appPayload: AppPayload;
+  dockerArgs: string[];
+  warnings: string[];
+};
+
+export type DeployResult = {
+  containerId: string;
+  plan: DeployPlan;
+  app: NaviApp;
+  proxySync: ProxySync;
+};
+
+export type DeployDoctor = {
+  ok: boolean;
+  dockerBin: string;
+  dockerHost: string | null;
+  dockerConfig: string | null;
+  platform: string;
+  userHelpRequired: boolean;
+  checks: Array<{
+    id: string;
+    label: string;
+    status: 'pass' | 'warn' | 'fail';
+    detail: string;
+  }>;
+  requirements: Array<{
+    id: string;
+    label: string;
+    status: 'ready' | 'auto' | 'needs_user' | 'blocked';
+    userHelpRequired: boolean;
+    detail: string;
+    commands: string[];
+  }>;
+  grantSteps: Array<{
+    title: string;
+    description: string;
+    commands: string[];
+  }>;
 };
 
 export type AppPayload = {
@@ -245,7 +310,14 @@ export const api = {
       body: JSON.stringify(payload)
     }),
   deleteApp: (id: string) =>
-    request<{ ok: true; proxySync?: ProxySync }>(`/api/apps/${id}`, {
+    request<{
+      ok: true;
+      proxySync?: ProxySync;
+      deployment?: {
+        provider: 'docker';
+        resourceName: string;
+      } | null;
+    }>(`/api/apps/${id}`, {
       method: 'DELETE'
     }),
   reorderApps: (ids: string[]) =>
@@ -292,6 +364,23 @@ export const api = {
       }
     ),
   backupSnapshots: () => request<BackupSnapshot[]>('/api/backup/snapshots'),
+  deployDoctor: (payload?: Partial<DeployPayload>) =>
+    payload
+      ? request<DeployDoctor>('/api/deploy/doctor', {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        })
+      : request<DeployDoctor>('/api/deploy/doctor'),
+  previewDeploy: (payload: DeployPayload) =>
+    request<DeployPlan>('/api/deploy/preview', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+  deployDockerRun: (payload: DeployPayload) =>
+    request<DeployResult>('/api/deploy/docker-run', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
   syncProxy: () =>
     request<ProxySync>('/api/proxy/sync', {
       method: 'POST'

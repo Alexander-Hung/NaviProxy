@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import ReactDOM from 'react-dom/client';
-import { LayoutDashboard, Settings } from 'lucide-react';
+import { LayoutDashboard, Rocket, Settings } from 'lucide-react';
 import { Admin } from './pages/Admin';
 import { Dashboard } from './pages/Dashboard';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -10,6 +10,7 @@ type Page = 'dashboard' | 'admin';
 
 function App() {
   const [page, setPage] = useState<Page>('dashboard');
+  const [openDeploySignal, setOpenDeploySignal] = useState(0);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     return localStorage.getItem('naviproxy-theme') === 'dark' ? 'dark' : 'light';
   });
@@ -26,6 +27,11 @@ function App() {
     ],
     []
   );
+
+  function openDeploy() {
+    setPage('admin');
+    setOpenDeploySignal((current) => current + 1);
+  }
 
   return (
     <div className="min-h-screen bg-[#f7faf9] text-ink transition-colors dark:bg-[#0f1714] dark:text-[#edf5f2]">
@@ -73,6 +79,13 @@ function App() {
                   </button>
                 );
               })}
+              <button
+                className="flex h-9 items-center gap-2 rounded px-3 text-sm font-medium text-black/60 transition hover:text-black dark:text-[#b8c7c1] dark:hover:text-[#f4fbf8]"
+                onClick={openDeploy}
+              >
+                <Rocket size={16} />
+                Deploy
+              </button>
             </nav>
             <ThemeToggle theme={theme} onChange={setTheme} />
           </div>
@@ -83,12 +96,15 @@ function App() {
         {page === 'dashboard' ? (
           <Dashboard onOpenAdmin={() => setPage('admin')} />
         ) : (
-          <Admin onBack={() => setPage('dashboard')} />
+          <Admin
+            onBack={() => setPage('dashboard')}
+            openDeploySignal={openDeploySignal}
+          />
         )}
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-black/10 bg-white p-2 dark:border-white/15 dark:bg-[#111916] sm:hidden">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const active = tab.id === page;
@@ -108,6 +124,13 @@ function App() {
               </button>
             );
           })}
+          <button
+            className="flex h-11 items-center justify-center gap-2 rounded bg-transparent text-sm font-medium text-black/65 dark:text-[#b8c7c1]"
+            onClick={openDeploy}
+          >
+            <Rocket size={17} />
+            Deploy
+          </button>
         </div>
       </nav>
     </div>

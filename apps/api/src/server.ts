@@ -10,6 +10,8 @@ import { registerAuditRoutes } from './modules/audit/audit.routes.js';
 import { AuditService } from './modules/audit/audit.service.js';
 import { registerBackupRoutes } from './modules/backup/backup.routes.js';
 import { registerDiagnosticsRoutes } from './modules/diagnostics/diagnostics.routes.js';
+import { registerDeployRoutes } from './modules/deploy/deploy.routes.js';
+import { DeployService } from './modules/deploy/deploy.service.js';
 import { AppsRepo } from './modules/apps/apps.repo.js';
 import { AppsService } from './modules/apps/apps.service.js';
 import { registerAppsRoutes } from './modules/apps/apps.routes.js';
@@ -29,6 +31,7 @@ const auditService = new AuditService(db);
 const settingsService = new SettingsService(db);
 const proxyService = new ProxyService(db, appsRepo, settingsService);
 const appsService = new AppsService(db, proxyService);
+const deployService = new DeployService(db, appsService);
 
 function scheduleStartupProxySync(attempt = 1) {
   const maxAttempts = 12;
@@ -116,9 +119,10 @@ registerAdminAuth(app, {
     config.dashboardAuthRequired || settingsService.getAll().dashboardAuthRequired
 });
 
-await registerAppsRoutes(app, appsService, auditService);
+await registerAppsRoutes(app, appsService, auditService, deployService);
 await registerProxyRoutes(app, proxyService, auditService);
 await registerDiagnosticsRoutes(app);
+await registerDeployRoutes(app, deployService, auditService);
 await registerSettingsRoutes(app, settingsService, auditService);
 await registerBackupRoutes(app, appsService, settingsService, auditService);
 await registerAuditRoutes(app, auditService);

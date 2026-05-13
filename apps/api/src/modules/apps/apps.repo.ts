@@ -29,6 +29,7 @@ function toRecord(row: AppRow): AppRecord {
     category: row.category,
     tags,
     favorite: row.favorite === 1,
+    managedDeployment: row.managed_deployment === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -40,7 +41,12 @@ export class AppsRepo {
   findAll() {
     const rows = this.db
       .prepare(
-        'SELECT * FROM apps ORDER BY sort_order ASC, created_at DESC'
+        `SELECT
+          apps.*,
+          CASE WHEN deployment_records.app_id IS NULL THEN 0 ELSE 1 END AS managed_deployment
+        FROM apps
+        LEFT JOIN deployment_records ON deployment_records.app_id = apps.id
+        ORDER BY apps.sort_order ASC, apps.created_at DESC`
       )
       .all() as AppRow[];
 
@@ -50,7 +56,13 @@ export class AppsRepo {
   findEnabled() {
     const rows = this.db
       .prepare(
-        'SELECT * FROM apps WHERE enabled = 1 ORDER BY sort_order ASC, created_at ASC'
+        `SELECT
+          apps.*,
+          CASE WHEN deployment_records.app_id IS NULL THEN 0 ELSE 1 END AS managed_deployment
+        FROM apps
+        LEFT JOIN deployment_records ON deployment_records.app_id = apps.id
+        WHERE apps.enabled = 1
+        ORDER BY apps.sort_order ASC, apps.created_at ASC`
       )
       .all() as AppRow[];
 
@@ -59,7 +71,14 @@ export class AppsRepo {
 
   findById(id: string) {
     const row = this.db
-      .prepare('SELECT * FROM apps WHERE id = ?')
+      .prepare(
+        `SELECT
+          apps.*,
+          CASE WHEN deployment_records.app_id IS NULL THEN 0 ELSE 1 END AS managed_deployment
+        FROM apps
+        LEFT JOIN deployment_records ON deployment_records.app_id = apps.id
+        WHERE apps.id = ?`
+      )
       .get(id) as AppRow | undefined;
 
     return row ? toRecord(row) : null;
@@ -67,7 +86,14 @@ export class AppsRepo {
 
   findBySlug(slug: string) {
     const row = this.db
-      .prepare('SELECT * FROM apps WHERE slug = ?')
+      .prepare(
+        `SELECT
+          apps.*,
+          CASE WHEN deployment_records.app_id IS NULL THEN 0 ELSE 1 END AS managed_deployment
+        FROM apps
+        LEFT JOIN deployment_records ON deployment_records.app_id = apps.id
+        WHERE apps.slug = ?`
+      )
       .get(slug) as AppRow | undefined;
 
     return row ? toRecord(row) : null;

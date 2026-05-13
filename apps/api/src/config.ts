@@ -32,6 +32,7 @@ export const config = {
   caddyAdminUrl: process.env.CADDY_ADMIN_URL ?? 'http://127.0.0.1:2019',
   caddySyncEnabled: process.env.CADDY_SYNC_ENABLED === 'true',
   caddyListen: process.env.CADDY_LISTEN ?? ':80',
+  dockerBin: process.env.DOCKER_BIN ?? 'docker',
   healthCheckIntervalSeconds: Number(process.env.HEALTH_CHECK_INTERVAL_SECONDS ?? 0),
   dashboardTargetUrl:
     process.env.NAVIPROXY_DASHBOARD_TARGET_URL ??

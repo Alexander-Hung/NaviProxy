@@ -1,11 +1,18 @@
 import {
+  AlertTriangle,
+  CheckCircle2,
+  Clipboard,
   Download,
+  ExternalLink,
+  LayoutDashboard,
   Plus,
   RefreshCw,
+  Rocket,
   Save,
   Search,
   Server,
   Shield,
+  Terminal,
   Upload,
   X
 } from 'lucide-react';
@@ -21,6 +28,10 @@ import {
   type AppStatus,
   type AuditLog,
   type BackupSnapshot,
+  type DeployDoctor,
+  type DeployPayload,
+  type DeployPlan,
+  type DeployResult,
   type DnsDiagnostic,
   type LocalService,
   type NaviSettings,
@@ -33,6 +44,7 @@ import {
 
 type Props = {
   onBack: () => void;
+  openDeploySignal?: number;
 };
 
 const initialForm: AppPayload = {
@@ -50,7 +62,202 @@ const initialForm: AppPayload = {
   favorite: false
 };
 
-export function Admin({ onBack }: Props) {
+const initialDeployForm: DeployPayload = {
+  method: 'docker_run',
+  command: 'docker run -d --name uptime-kuma -p 3001 louislam/uptime-kuma:1',
+  publishMode: 'reverse_proxy',
+  name: '',
+  publicHost: 'uptime.lab.home',
+  routeMode: 'subdomain',
+  publicPath: null,
+  hostPort: null,
+  containerPort: null,
+  category: 'Self-hosted',
+  tags: [],
+  favorite: false,
+  enabled: true
+};
+
+function tokenizeDeployCommand(command: string) {
+  const tokens: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+
+  for (const char of command) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+
+    if (char === '\\' && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+
+    if ((char === '"' || char === "'") && !quote) {
+      quote = char;
+      continue;
+    }
+
+    if (quote === char) {
+      quote = null;
+      continue;
+    }
+
+    if (!quote && /\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
+function parsePublishPort(raw: string) {
+  const [withoutProtocol, protocol = 'tcp'] = raw.split('/');
+
+  if (protocol !== 'tcp') {
+    return null;
+  }
+
+  const segments = withoutProtocol.split(':');
+  const containerPort = Number(segments.at(-1));
+
+  if (!Number.isInteger(containerPort) || containerPort < 1 || containerPort > 65535) {
+    return null;
+  }
+
+  const hostPart = segments.length >= 2 ? segments.at(-2) : null;
+  const hostPort = hostPart && /^\d+$/.test(hostPart) ? Number(hostPart) : null;
+
+  if (hostPort !== null && (hostPort < 1 || hostPort > 65535)) {
+    return null;
+  }
+
+  return {
+    hostPort,
+    containerPort
+  };
+}
+
+function parsePublishPortFromCommand(command: string) {
+  const tokens = tokenizeDeployCommand(command);
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index];
+
+    if (token === '-p' || token === '--publish') {
+      const parsed = parsePublishPort(tokens[index + 1] ?? '');
+
+      if (parsed) {
+        return parsed;
+      }
+    }
+
+    if (token.startsWith('--publish=')) {
+      const parsed = parsePublishPort(token.slice('--publish='.length));
+
+      if (parsed) {
+        return parsed;
+      }
+    }
+
+    if (token.startsWith('-p') && token.length > 2) {
+      const parsed = parsePublishPort(token.slice(2));
+
+      if (parsed) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+function slugifyDeployName(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
+
+function nameFromDeployImage(image: string) {
+  const withoutDigest = image.split('@')[0];
+  const withoutTag = withoutDigest.includes(':')
+    ? withoutDigest.slice(0, withoutDigest.lastIndexOf(':'))
+    : withoutDigest;
+
+  return withoutTag.split('/').at(-1) ?? '';
+}
+
+function parseDeployCommand(command: string) {
+  const tokens = tokenizeDeployCommand(command);
+  const startIndex =
+    tokens[0] === 'sudo' && tokens[1] === 'docker' && tokens[2] === 'run'
+      ? 3
+      : tokens[0] === 'docker' && tokens[1] === 'run'
+        ? 2
+        : 0;
+  let containerName = '';
+  let image = '';
+
+  for (let index = startIndex; index < tokens.length; index += 1) {
+    const token = tokens[index];
+
+    if (!image && token === '--name') {
+      containerName = tokens[index + 1] ?? '';
+      index += 1;
+      continue;
+    }
+
+    if (!image && token.startsWith('--name=')) {
+      containerName = token.slice('--name='.length);
+      continue;
+    }
+
+    if (!image && (token === '-p' || token === '--publish')) {
+      index += 1;
+      continue;
+    }
+
+    if (!image && token.startsWith('-')) {
+      continue;
+    }
+
+    if (!image) {
+      image = token;
+      break;
+    }
+  }
+
+  const name = containerName || nameFromDeployImage(image);
+
+  return {
+    name,
+    slug: slugifyDeployName(name),
+    port: parsePublishPortFromCommand(command)
+  };
+}
+
+function hostSuffixFrom(value: string) {
+  const parts = value.split('.').filter(Boolean);
+  return parts.length > 1 ? parts.slice(1).join('.') : 'lab.home';
+}
+
+export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   const [apps, setApps] = useState<NaviApp[]>([]);
   const [statuses, setStatuses] = useState<Record<string, AppStatus>>({});
   const [healthHistory, setHealthHistory] = useState<AppStatus[]>([]);
@@ -76,12 +283,20 @@ export function Admin({ onBack }: Props) {
   const [proxyDiagnostics, setProxyDiagnostics] = useState<ProxyDiagnostics | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [backupSnapshots, setBackupSnapshots] = useState<BackupSnapshot[]>([]);
+  const [deployForm, setDeployForm] = useState<DeployPayload>(initialDeployForm);
+  const [deployPlan, setDeployPlan] = useState<DeployPlan | null>(null);
+  const [deployDoctor, setDeployDoctor] = useState<DeployDoctor | null>(null);
+  const [deploySuccess, setDeploySuccess] = useState<DeployResult | null>(null);
+  const [showDeployDialog, setShowDeployDialog] = useState(false);
   const [detailAppId, setDetailAppId] = useState<string | null>(null);
   const [detailHistory, setDetailHistory] = useState<AppStatus[]>([]);
   const [appSearch, setAppSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [scanningServices, setScanningServices] = useState(false);
+  const [previewingDeploy, setPreviewingDeploy] = useState(false);
+  const [checkingDeployPermission, setCheckingDeployPermission] = useState(false);
+  const [deploying, setDeploying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -136,6 +351,56 @@ export function Admin({ onBack }: Props) {
       setError(err instanceof Error ? err.message : String(err))
     );
   }, []);
+
+  useEffect(() => {
+    if (openDeploySignal > 0) {
+      setError(null);
+      setMessage(null);
+      setShowDeployDialog(true);
+    }
+  }, [openDeploySignal]);
+
+  useEffect(() => {
+    if (!showDeployDialog || deployDoctor || checkingDeployPermission) {
+      return;
+    }
+
+    void checkDeployPermission(false);
+  }, [checkingDeployPermission, deployDoctor, showDeployDialog]);
+
+  useEffect(() => {
+    if (
+      !showDeployDialog ||
+      !deployForm.command.trim() ||
+      !deployForm.containerPort ||
+      deployForm.hostPort
+    ) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      void api
+        .previewDeploy(deployPayload())
+        .then((plan) => {
+          setDeployPlan(plan);
+
+          if (plan.hostPort) {
+            setDeployForm((current) => ({
+              ...current,
+              hostPort: plan.hostPort
+            }));
+          }
+        })
+        .catch(() => undefined);
+    }, 500);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    deployForm.command,
+    deployForm.containerPort,
+    deployForm.hostPort,
+    showDeployDialog
+  ]);
 
   const sortedApps = useMemo(
     () =>
@@ -326,6 +591,65 @@ export function Admin({ onBack }: Props) {
     setForm((current) => ({ ...current, [key]: value }));
   }
 
+  function updateDeploy<K extends keyof DeployPayload>(
+    key: K,
+    value: DeployPayload[K]
+  ) {
+    setDeployForm((current) => ({ ...current, [key]: value }));
+    setDeployPlan(null);
+    setDeployDoctor(null);
+  }
+
+  function updateDeployCommand(command: string) {
+    const parsed = parseDeployCommand(command);
+
+    setDeployForm((current) => ({
+      ...current,
+      command,
+      ...(parsed.name
+        ? {
+            name: parsed.name
+          }
+        : {}),
+      ...(parsed.slug
+        ? {
+            publicHost: `${parsed.slug}.${hostSuffixFrom(current.publicHost)}`
+          }
+        : {}),
+      ...(parsed.port
+        ? {
+            hostPort: parsed.port.hostPort,
+            containerPort: parsed.port.containerPort
+          }
+        : {})
+    }));
+    setDeployPlan(null);
+    setDeployDoctor(null);
+  }
+
+  function deployPayload() {
+    return {
+      ...deployForm,
+      name: deployForm.name?.trim() || undefined,
+      publicPath:
+        deployForm.routeMode === 'subpath'
+          ? deployForm.publicPath || '/app'
+          : null,
+      hostPort: deployForm.hostPort || null,
+      containerPort: deployForm.containerPort || null,
+      tags: deployForm.tags.filter(Boolean)
+    };
+  }
+
+  function appPublicUrl(app: NaviApp) {
+    const route =
+      app.routeMode === 'subdomain'
+        ? app.publicHost
+        : `${app.publicHost}${app.publicPath ?? ''}`;
+
+    return /^https?:\/\//i.test(route) ? route : `http://${route}`;
+  }
+
   function setRouteMode(mode: RouteMode) {
     setForm((current) => ({
       ...current,
@@ -405,7 +729,11 @@ export function Admin({ onBack }: Props) {
   }
 
   async function deleteApp(app: NaviApp) {
-    if (!window.confirm(`Delete ${app.name}?`)) {
+    const confirmation = app.managedDeployment
+      ? `Delete ${app.name} and remove its Docker container? This will also free its published port.`
+      : `Delete ${app.name}?`;
+
+    if (!window.confirm(confirmation)) {
       return;
     }
 
@@ -414,7 +742,11 @@ export function Admin({ onBack }: Props) {
 
     try {
       const result = await api.deleteApp(app.id);
-      setMessage(proxySyncMessage(result.proxySync));
+      setMessage(
+        result.deployment
+          ? `${proxySyncMessage(result.proxySync)} Removed Docker container ${result.deployment.resourceName}.`
+          : proxySyncMessage(result.proxySync)
+      );
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -580,6 +912,91 @@ export function Admin({ onBack }: Props) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setScanningServices(false);
+    }
+  }
+
+  async function checkDeployPermission(showResult = true) {
+    setCheckingDeployPermission(true);
+    setError(null);
+
+    try {
+      const result = await api.deployDoctor(deployPayload());
+      setDeployDoctor(result);
+
+      if (showResult) {
+        setMessage(
+          result.ok
+            ? result.userHelpRequired
+              ? 'Deploy can run, but this command needs user review.'
+              : 'Deploy permissions are ready.'
+            : 'Deploy needs host permission. Follow the commands in the permission panel.'
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCheckingDeployPermission(false);
+    }
+  }
+
+  async function copyCommand(command: string) {
+    try {
+      await navigator.clipboard.writeText(command);
+      setMessage('Command copied.');
+      setError(null);
+    } catch {
+      setError('Could not copy command from this browser.');
+    }
+  }
+
+  async function previewDeploy() {
+    setPreviewingDeploy(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const plan = await api.previewDeploy(deployPayload());
+      setDeployPlan(plan);
+      setMessage(`Prepared ${plan.containerName} -> ${plan.targetUrl}.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPreviewingDeploy(false);
+    }
+  }
+
+  async function deployDockerRun() {
+    const currentDoctor = deployDoctor ?? await api.deployDoctor(deployPayload());
+    setDeployDoctor(currentDoctor);
+
+    if (currentDoctor.ok === false) {
+      setError('Deploy needs host permission first. Run the commands in the permission panel, then click Recheck.');
+      return;
+    }
+
+    const confirmation = currentDoctor.userHelpRequired
+      ? 'This command needs user review because it requests host-level access. Deploy it and create a public route?'
+      : 'Deploy this Docker container and create a public route?';
+
+    if (!window.confirm(confirmation)) {
+      return;
+    }
+
+    setDeploying(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const result = await api.deployDockerRun(deployPayload());
+      setDeployPlan(result.plan);
+      setDeploySuccess(result);
+      setShowDeployDialog(false);
+      setMessage(proxySyncMessage(result.proxySync));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeploying(false);
     }
   }
 
@@ -1114,7 +1531,588 @@ export function Admin({ onBack }: Props) {
           </section>
         ) : null}
 
+        {showDeployDialog ? (
+          <div
+            className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4 backdrop-blur-sm"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setShowDeployDialog(false);
+              }
+            }}
+          >
+            <section
+              className="panel max-h-[min(720px,calc(100vh-2rem))] w-full max-w-4xl overflow-auto p-4 shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="deployDialogTitle"
+            >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h3 id="deployDialogTitle" className="text-sm font-semibold">
+                  Deploy self-hosted app
+                </h3>
+                <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
+                  Docker run command, auto port, and public route
+                </p>
+              </div>
+              <button
+                className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-black/5 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+                onClick={() => setShowDeployDialog(false)}
+                title="Close deploy dialog"
+                aria-label="Close deploy dialog"
+              >
+                <X size={17} />
+              </button>
+            </div>
+
+            <div className="mb-3 rounded border border-black/10 bg-[#f7faf8] p-3 text-xs dark:border-white/15 dark:bg-[#15201c]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Shield size={16} className="text-spruce dark:text-[#9be8d7]" />
+                  <div>
+                    <div className="font-semibold">Host permission</div>
+                    <div className="text-black/50 dark:text-[#a9bbb4]">
+	                      {deployDoctor
+	                        ? deployDoctor.ok
+	                          ? deployDoctor.userHelpRequired
+	                            ? 'Docker is reachable. This command still needs user review.'
+	                            : 'Docker can run this command without extra user help.'
+	                          : 'This command needs host authorization before deployment can run.'
+	                        : 'Check whether this process can execute Docker.'}
+                    </div>
+                  </div>
+                </div>
+                <button
+                  className="btn-secondary h-9"
+                  type="button"
+                  onClick={() => void checkDeployPermission()}
+                  disabled={checkingDeployPermission}
+                >
+                  <RefreshCw
+                    size={15}
+                    className={checkingDeployPermission ? 'animate-spin' : ''}
+                  />
+                  {checkingDeployPermission ? 'Checking' : 'Recheck'}
+                </button>
+              </div>
+
+              {deployDoctor ? (
+                <div className="mt-3 grid gap-2">
+                  <div className="grid gap-2 md:grid-cols-3">
+                    {deployDoctor.checks.map((check) => (
+                      <div
+                        key={check.id}
+                        className="rounded border border-black/10 bg-white/70 p-2 dark:border-white/10 dark:bg-white/[0.04]"
+                      >
+                        <div className="flex items-center gap-2 font-semibold">
+                          {check.status === 'pass' ? (
+                            <CheckCircle2 size={14} className="text-spruce dark:text-[#9be8d7]" />
+                          ) : (
+                            <AlertTriangle size={14} className="text-amber" />
+                          )}
+                          {check.label}
+                        </div>
+                        <div className="mt-1 break-all text-black/55 dark:text-[#b8c7c1]">
+                          {check.detail}
+                        </div>
+                      </div>
+                    ))}
+	                  </div>
+
+	                  {deployDoctor.requirements.length > 0 ? (
+	                    <div className="grid gap-2">
+	                      <div className="font-semibold">Command requirements</div>
+	                      {deployDoctor.requirements.map((requirement) => (
+	                        <div
+	                          key={requirement.id}
+	                          className={`rounded border p-3 ${
+	                            requirement.status === 'blocked'
+	                              ? 'border-coral/30 bg-coral/10'
+	                              : requirement.status === 'needs_user'
+	                                ? 'border-amber/30 bg-amber/10'
+	                                : 'border-black/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]'
+	                          }`}
+	                        >
+	                          <div className="flex items-start gap-2">
+	                            {requirement.status === 'ready' ? (
+	                              <CheckCircle2 size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
+	                            ) : requirement.status === 'auto' ? (
+	                              <RefreshCw size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
+	                            ) : requirement.status === 'blocked' ? (
+	                              <X size={15} className="mt-0.5 text-coral" />
+	                            ) : (
+	                              <AlertTriangle size={15} className="mt-0.5 text-amber" />
+	                            )}
+	                            <div className="min-w-0 flex-1">
+	                              <div className="flex flex-wrap items-center gap-2">
+	                                <span className="font-semibold">{requirement.label}</span>
+	                                <span className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-black/45 dark:border-white/15 dark:text-[#a9bbb4]">
+	                                  {requirement.status === 'ready'
+	                                    ? 'ready'
+	                                    : requirement.status === 'auto'
+	                                      ? 'auto'
+	                                      : requirement.status === 'blocked'
+	                                        ? 'needs fix'
+	                                        : 'review'}
+	                                </span>
+	                              </div>
+	                              <div className="mt-1 break-words text-black/60 dark:text-[#b8c7c1]">
+	                                {requirement.detail}
+	                              </div>
+	                              {requirement.commands.length > 0 ? (
+	                                <div className="mt-2 grid gap-1">
+	                                  {requirement.commands.map((command) => (
+	                                    <div
+	                                      key={command}
+	                                      className="flex items-center gap-2 rounded bg-black/[0.04] px-2 py-1.5 font-mono text-[11px] dark:bg-black/25"
+	                                    >
+	                                      <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre">
+	                                        {command}
+	                                      </code>
+	                                      <button
+	                                        type="button"
+	                                        className="grid h-7 w-7 shrink-0 place-items-center rounded text-black/45 transition hover:bg-black/10 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+	                                        onClick={() => void copyCommand(command)}
+	                                        title="Copy command"
+	                                        aria-label="Copy command"
+	                                      >
+	                                        <Clipboard size={14} />
+	                                      </button>
+	                                    </div>
+	                                  ))}
+	                                </div>
+	                              ) : null}
+	                            </div>
+	                          </div>
+	                        </div>
+	                      ))}
+	                    </div>
+	                  ) : null}
+
+	                  {deployDoctor.grantSteps.length > 0 ? (
+	                    <div className="grid gap-2">
+                      {deployDoctor.grantSteps.map((step) => (
+                        <div
+                          key={step.title}
+                          className="rounded border border-amber/30 bg-amber/10 p-3"
+                        >
+                          <div className="flex items-start gap-2">
+                            <Terminal size={15} className="mt-0.5 text-amber" />
+                            <div>
+                              <div className="font-semibold">{step.title}</div>
+                              <div className="mt-1 text-black/60 dark:text-[#d5caa2]">
+                                {step.description}
+                              </div>
+                            </div>
+                          </div>
+                          {step.commands.length > 0 ? (
+                            <div className="mt-2 grid gap-1">
+                              {step.commands.map((command) => (
+                                <div
+                                  key={command}
+                                  className="flex items-center gap-2 rounded bg-black/[0.04] px-2 py-1.5 font-mono text-[11px] dark:bg-black/25"
+                                >
+                                  <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre">
+                                    {command}
+                                  </code>
+                                  <button
+                                    type="button"
+                                    className="grid h-7 w-7 shrink-0 place-items-center rounded text-black/45 transition hover:bg-black/10 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+                                    onClick={() => void copyCommand(command)}
+                                    title="Copy command"
+                                    aria-label="Copy command"
+                                  >
+                                    <Clipboard size={14} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="grid gap-3">
+              <div>
+                <label className="label" htmlFor="deployCommand">
+                  Docker command
+                </label>
+                <textarea
+                  id="deployCommand"
+                  className="field min-h-28 resize-y py-3"
+                  value={deployForm.command}
+                  onChange={(event) => updateDeployCommand(event.target.value)}
+                  placeholder="docker run -d --name app -p 8080:80 image:tag"
+                />
+              </div>
+
+              <div>
+                <span className="label">Publish</span>
+                <div className="grid gap-2 rounded border border-black/10 bg-[#f1f5f3] p-1 dark:border-white/15 dark:bg-[#18211e] md:grid-cols-2">
+                  {[
+                    {
+                      id: 'reverse_proxy' as const,
+                      title: 'Reverse proxy',
+                      detail: 'Bind an internal host through Caddy'
+                    },
+                    {
+                      id: 'public_domain_reverse_proxy' as const,
+                      title: 'Public domain + proxy',
+                      detail: 'Bind a real domain and reverse proxy'
+                    }
+                  ].map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      className={`rounded px-3 py-2 text-left transition ${
+                        deployForm.publishMode === mode.id
+                          ? 'bg-white text-spruce shadow-sm dark:bg-[#24312d] dark:text-[#f4fbf8]'
+                          : 'text-black/60 hover:text-black dark:text-[#b8c7c1] dark:hover:text-[#f4fbf8]'
+                      }`}
+                      onClick={() => {
+                        updateDeploy('publishMode', mode.id);
+                      }}
+                    >
+                      <span className="block text-xs font-semibold">{mode.title}</span>
+                      <span className="mt-1 block text-[11px] opacity-75">{mode.detail}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div>
+                  <label className="label" htmlFor="deployName">
+                    App name
+                  </label>
+                  <input
+                    id="deployName"
+                    className="field"
+                    value={deployForm.name ?? ''}
+                    onChange={(event) =>
+                      updateDeploy('name', event.target.value || undefined)
+                    }
+                    placeholder="Optional"
+                  />
+                </div>
+                <div>
+                  <label className="label" htmlFor="deployPublicHost">
+                    {deployForm.publishMode === 'public_domain_reverse_proxy'
+                      ? 'Public domain'
+                      : 'Proxy host'}
+                  </label>
+                  <input
+                    id="deployPublicHost"
+                    className="field"
+                    value={deployForm.publicHost}
+                    onChange={(event) =>
+                      updateDeploy('publicHost', event.target.value)
+                    }
+                    placeholder={
+                      deployForm.publishMode === 'public_domain_reverse_proxy'
+                        ? 'app.example.com'
+                        : 'app.lab.home'
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="label" htmlFor="deployCategory">
+                    Category
+                  </label>
+                  <input
+                    id="deployCategory"
+                    className="field"
+                    value={deployForm.category ?? ''}
+                    onChange={(event) =>
+                      updateDeploy('category', event.target.value || null)
+                    }
+                    placeholder="Self-hosted"
+                  />
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-[160px,1fr,1fr,1fr]">
+                <div>
+                  <span className="label">Route</span>
+                  <div className="grid grid-cols-2 gap-1 rounded border border-black/10 bg-[#f1f5f3] p-1 dark:border-white/15 dark:bg-[#18211e]">
+                    {(['subdomain', 'subpath'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        className={`h-9 rounded text-xs font-semibold transition ${
+                          deployForm.routeMode === mode
+                            ? 'bg-white text-spruce shadow-sm dark:bg-[#24312d] dark:text-[#f4fbf8]'
+                            : 'text-black/55 hover:text-black dark:text-[#b8c7c1] dark:hover:text-[#f4fbf8]'
+                        }`}
+                        onClick={() =>
+                          {
+                            setDeployForm((current) => ({
+                              ...current,
+                              routeMode: mode,
+                              publicPath:
+                                mode === 'subpath'
+                                  ? current.publicPath ?? '/app'
+                                  : null
+                            }));
+                            setDeployPlan(null);
+                            setDeployDoctor(null);
+                          }
+                        }
+                      >
+                        {mode === 'subdomain' ? 'Sub' : 'Path'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {deployForm.routeMode === 'subpath' ? (
+                  <div>
+                    <label className="label" htmlFor="deployPublicPath">
+                      Public path
+                    </label>
+                    <input
+                      id="deployPublicPath"
+                      className="field"
+                      value={deployForm.publicPath ?? ''}
+                      onChange={(event) =>
+                        updateDeploy('publicPath', event.target.value || null)
+                      }
+                      placeholder="/app"
+                    />
+                  </div>
+                ) : null}
+                <div>
+                  <label className="label" htmlFor="deployHostPort">
+                    Host port
+                  </label>
+                  <input
+                    id="deployHostPort"
+                    className="field"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={deployForm.hostPort ?? ''}
+                    onChange={(event) =>
+                      updateDeploy(
+                        'hostPort',
+                        event.target.value ? Number(event.target.value) : null
+                      )
+                    }
+                    placeholder="Auto"
+                  />
+                </div>
+                <div>
+                  <label className="label" htmlFor="deployContainerPort">
+                    Container port
+                  </label>
+                  <input
+                    id="deployContainerPort"
+                    className="field"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={deployForm.containerPort ?? ''}
+                    onChange={(event) =>
+                      updateDeploy(
+                        'containerPort',
+                        event.target.value ? Number(event.target.value) : null
+                      )
+                    }
+                    placeholder="From -p"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="label" htmlFor="deployTags">
+                  Tags
+                </label>
+                <input
+                  id="deployTags"
+                  className="field"
+                  value={deployForm.tags.join(', ')}
+                  onChange={(event) =>
+                    updateDeploy(
+                      'tags',
+                      event.target.value
+                        .split(',')
+                        .map((tag) => tag.trim())
+                        .filter(Boolean)
+                    )
+                  }
+                  placeholder="docker, media"
+                />
+              </div>
+
+              {deployPlan ? (
+                <div className="grid gap-2 rounded border border-black/10 bg-black/[0.02] p-3 text-xs dark:border-white/15 dark:bg-white/[0.03] md:grid-cols-4">
+                  <div>
+                    <div className="label">Container</div>
+                    <div className="break-all font-semibold">
+                      {deployPlan.containerName}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="label">Image</div>
+                    <div className="break-all font-semibold">
+                      {deployPlan.image}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="label">Route target</div>
+                    <div className="break-all font-semibold">
+                      {deployPlan.targetUrl}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="label">Publish</div>
+                    <div className="break-all font-semibold">
+                      {deployPlan.publishMode === 'public_domain_reverse_proxy'
+                        ? 'Public domain + proxy'
+                        : 'Reverse proxy'}
+                    </div>
+                  </div>
+                  {deployPlan.warnings.length > 0 ? (
+                    <div className="text-amber md:col-span-4">
+                      {deployPlan.warnings.join(' ')}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {error ? (
+                <div className="rounded border border-coral/30 bg-coral/10 p-3 text-sm text-coral">
+                  {error}
+                </div>
+              ) : null}
+              {message ? (
+                <div className="rounded border border-spruce/25 bg-spruce/10 p-3 text-sm text-spruce dark:border-[#8fe0ce]/25 dark:bg-[#8fe0ce]/10 dark:text-[#9be8d7]">
+                  {message}
+                </div>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black disabled:opacity-60 dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
+                  onClick={() => void previewDeploy()}
+                  disabled={previewingDeploy || !deployForm.command.trim()}
+                >
+                  <Search size={16} />
+                  {previewingDeploy ? 'Previewing...' : 'Preview'}
+                </button>
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded bg-spruce px-3 text-sm font-semibold text-white transition hover:bg-[#11564a] disabled:opacity-60"
+                  onClick={() => void deployDockerRun()}
+                  disabled={
+                    deploying ||
+                    checkingDeployPermission ||
+                    !deployForm.command.trim() ||
+                    deployDoctor?.ok === false
+                  }
+                >
+                  <Rocket size={16} />
+                  {deploying ? 'Deploying...' : 'Deploy'}
+                </button>
+              </div>
+            </div>
+          </section>
+          </div>
+        ) : null}
+
+        {deploySuccess ? (
+          <div
+            className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4 backdrop-blur-sm"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setDeploySuccess(null);
+              }
+            }}
+          >
+            <section
+              className="panel w-full max-w-lg p-4 shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="deploySuccessTitle"
+            >
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded bg-spruce/10 text-spruce dark:bg-[#8fe0ce]/10 dark:text-[#9be8d7]">
+                    <CheckCircle2 size={20} />
+                  </span>
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-black/45 dark:text-[#a9bbb4]">
+                      Deploy complete
+                    </p>
+                    <h3 id="deploySuccessTitle" className="mt-1 text-lg font-semibold">
+                      {deploySuccess.app.name} is self-hosted
+                    </h3>
+                  </div>
+                </div>
+                <button
+                  className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-black/5 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+                  onClick={() => setDeploySuccess(null)}
+                  title="Close deploy success"
+                  aria-label="Close deploy success"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+
+              <div className="grid gap-2 text-sm">
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Public route</div>
+                  <div className="break-all font-semibold">
+                    {deploySuccess.app.routeMode === 'subdomain'
+                      ? deploySuccess.app.publicHost
+                      : `${deploySuccess.app.publicHost}${deploySuccess.app.publicPath ?? ''}`}
+                  </div>
+                </div>
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Container</div>
+                  <div className="break-all font-semibold">
+                    {deploySuccess.plan.containerName}
+                  </div>
+                </div>
+                <div className="rounded border border-black/10 p-3 dark:border-white/15">
+                  <div className="label">Target</div>
+                  <div className="break-all font-semibold">
+                    {deploySuccess.plan.targetUrl}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded bg-spruce px-3 text-sm font-semibold text-white transition hover:bg-[#11564a]"
+                  type="button"
+                  onClick={() => {
+                    setDeploySuccess(null);
+                    onBack();
+                  }}
+                >
+                  <LayoutDashboard size={16} />
+                  Dashboard
+                </button>
+                <button
+                  className="inline-flex h-10 items-center gap-2 rounded border border-black/10 bg-white px-3 text-sm font-semibold text-black/65 transition hover:text-black dark:border-white/15 dark:bg-[#18211e] dark:text-[#d7e4df] dark:hover:border-[#8fe0ce]/40 dark:hover:text-white"
+                  type="button"
+                  onClick={() => window.open(appPublicUrl(deploySuccess.app), '_blank', 'noopener,noreferrer')}
+                >
+                  <ExternalLink size={16} />
+                  Open app
+                </button>
+              </div>
+            </section>
+          </div>
+        ) : null}
+
         <div className="mt-6 grid gap-4 lg:grid-cols-2">
+
           <section className="panel p-4 lg:col-span-2">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
