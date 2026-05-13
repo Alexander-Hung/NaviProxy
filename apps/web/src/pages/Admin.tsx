@@ -589,6 +589,191 @@ function hostSuffixFrom(value: string) {
   return parts.length > 1 ? parts.slice(1).join('.') : 'lab.home';
 }
 
+function DeployHostPermissionSection({
+  deployDoctor,
+  checkingDeployPermission,
+  checkDeployPermission,
+  copyCommand
+}: {
+  deployDoctor: DeployDoctor | null;
+  checkingDeployPermission: boolean;
+  checkDeployPermission: () => void;
+  copyCommand: (command: string) => void;
+}) {
+  return (
+    <div className="rounded border border-black/10 bg-[#f7faf8] p-3 text-xs dark:border-white/15 dark:bg-[#15201c]">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Shield size={16} className="text-spruce dark:text-[#9be8d7]" />
+          <div>
+            <div className="font-semibold">Host permission</div>
+            <div className="text-black/50 dark:text-[#a9bbb4]">
+              {deployDoctor
+                ? deployDoctor.ok
+                  ? deployDoctor.userHelpRequired
+                    ? 'Docker is reachable. This command still needs user review.'
+                    : 'Docker can run this command without extra user help.'
+                  : 'This command needs host authorization before deployment can run.'
+                : 'Check whether this process can execute Docker.'}
+            </div>
+          </div>
+        </div>
+        <button
+          className="btn-secondary h-9"
+          type="button"
+          onClick={() => void checkDeployPermission()}
+          disabled={checkingDeployPermission}
+        >
+          <RefreshCw
+            size={15}
+            className={checkingDeployPermission ? 'animate-spin' : ''}
+          />
+          {checkingDeployPermission ? 'Checking' : 'Recheck'}
+        </button>
+      </div>
+
+      {deployDoctor ? (
+        <div className="mt-3 grid gap-2">
+          <div className="grid gap-2 md:grid-cols-3">
+            {deployDoctor.checks.map((check) => (
+              <div
+                key={check.id}
+                className="rounded border border-black/10 bg-white/70 p-2 dark:border-white/10 dark:bg-white/[0.04]"
+              >
+                <div className="flex items-center gap-2 font-semibold">
+                  {check.status === 'pass' ? (
+                    <CheckCircle2 size={14} className="text-spruce dark:text-[#9be8d7]" />
+                  ) : (
+                    <AlertTriangle size={14} className="text-amber" />
+                  )}
+                  {check.label}
+                </div>
+                <div className="mt-1 break-all text-black/55 dark:text-[#b8c7c1]">
+                  {check.detail}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {deployDoctor.requirements.length > 0 ? (
+            <div className="grid gap-2">
+              <div className="font-semibold">Command requirements</div>
+              {deployDoctor.requirements.map((requirement) => (
+                <div
+                  key={requirement.id}
+                  className={`rounded border p-3 ${
+                    requirement.status === 'blocked'
+                      ? 'border-coral/30 bg-coral/10'
+                      : requirement.status === 'needs_user'
+                        ? 'border-amber/30 bg-amber/10'
+                        : 'border-black/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    {requirement.status === 'ready' ? (
+                      <CheckCircle2 size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
+                    ) : requirement.status === 'auto' ? (
+                      <RefreshCw size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
+                    ) : requirement.status === 'blocked' ? (
+                      <X size={15} className="mt-0.5 text-coral" />
+                    ) : (
+                      <AlertTriangle size={15} className="mt-0.5 text-amber" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold">{requirement.label}</span>
+                        <span className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-black/45 dark:border-white/15 dark:text-[#a9bbb4]">
+                          {requirement.status === 'ready'
+                            ? 'ready'
+                            : requirement.status === 'auto'
+                              ? 'auto'
+                              : requirement.status === 'blocked'
+                                ? 'needs fix'
+                                : 'review'}
+                        </span>
+                      </div>
+                      <div className="mt-1 break-words text-black/60 dark:text-[#b8c7c1]">
+                        {requirement.detail}
+                      </div>
+                      {requirement.commands.length > 0 ? (
+                        <div className="mt-2 grid gap-1">
+                          {requirement.commands.map((command) => (
+                            <div
+                              key={command}
+                              className="flex items-center gap-2 rounded bg-black/[0.04] px-2 py-1.5 font-mono text-[11px] dark:bg-black/25"
+                            >
+                              <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre">
+                                {command}
+                              </code>
+                              <button
+                                type="button"
+                                className="grid h-7 w-7 shrink-0 place-items-center rounded text-black/45 transition hover:bg-black/10 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+                                onClick={() => void copyCommand(command)}
+                                title="Copy command"
+                                aria-label="Copy command"
+                              >
+                                <Clipboard size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {deployDoctor.grantSteps.length > 0 ? (
+            <div className="grid gap-2">
+              {deployDoctor.grantSteps.map((step) => (
+                <div
+                  key={step.title}
+                  className="rounded border border-amber/30 bg-amber/10 p-3"
+                >
+                  <div className="flex items-start gap-2">
+                    <Terminal size={15} className="mt-0.5 text-amber" />
+                    <div>
+                      <div className="font-semibold">{step.title}</div>
+                      <div className="mt-1 text-black/60 dark:text-[#d5caa2]">
+                        {step.description}
+                      </div>
+                    </div>
+                  </div>
+                  {step.commands.length > 0 ? (
+                    <div className="mt-2 grid gap-1">
+                      {step.commands.map((command) => (
+                        <div
+                          key={command}
+                          className="flex items-center gap-2 rounded bg-black/[0.04] px-2 py-1.5 font-mono text-[11px] dark:bg-black/25"
+                        >
+                          <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre">
+                            {command}
+                          </code>
+                          <button
+                            type="button"
+                            className="grid h-7 w-7 shrink-0 place-items-center rounded text-black/45 transition hover:bg-black/10 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+                            onClick={() => void copyCommand(command)}
+                            title="Copy command"
+                            aria-label="Copy command"
+                          >
+                            <Clipboard size={14} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   const [apps, setApps] = useState<NaviApp[]>([]);
   const [statuses, setStatuses] = useState<Record<string, AppStatus>>({});
@@ -1903,197 +2088,26 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
               aria-modal="true"
               aria-labelledby="deployDialogTitle"
             >
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h3 id="deployDialogTitle" className="text-sm font-semibold">
-                  Deploy self-hosted app
-                </h3>
-                <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
-                  Docker run command, auto port, and public route
-                </p>
-              </div>
-              <button
-                className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-black/5 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
-                onClick={() => setShowDeployDialog(false)}
-                title="Close deploy dialog"
-                aria-label="Close deploy dialog"
-              >
-                <X size={17} />
-              </button>
-            </div>
-
-            <div className="mb-3 rounded border border-black/10 bg-[#f7faf8] p-3 text-xs dark:border-white/15 dark:bg-[#15201c]">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Shield size={16} className="text-spruce dark:text-[#9be8d7]" />
-                  <div>
-                    <div className="font-semibold">Host permission</div>
-                    <div className="text-black/50 dark:text-[#a9bbb4]">
-                        {deployDoctor
-                          ? deployDoctor.ok
-                            ? deployDoctor.userHelpRequired
-                              ? 'Docker is reachable. This command still needs user review.'
-                              : 'Docker can run this command without extra user help.'
-                            : 'This command needs host authorization before deployment can run.'
-                          : 'Check whether this process can execute Docker.'}
-                    </div>
-                  </div>
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h3 id="deployDialogTitle" className="text-sm font-semibold">
+                    Deploy self-hosted app
+                  </h3>
+                  <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
+                    Docker run command, auto port, and public route
+                  </p>
                 </div>
                 <button
-                  className="btn-secondary h-9"
-                  type="button"
-                  onClick={() => void checkDeployPermission()}
-                  disabled={checkingDeployPermission}
+                  className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-black/5 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+                  onClick={() => setShowDeployDialog(false)}
+                  title="Close deploy dialog"
+                  aria-label="Close deploy dialog"
                 >
-                  <RefreshCw
-                    size={15}
-                    className={checkingDeployPermission ? 'animate-spin' : ''}
-                  />
-                  {checkingDeployPermission ? 'Checking' : 'Recheck'}
+                  <X size={17} />
                 </button>
               </div>
 
-              {deployDoctor ? (
-                <div className="mt-3 grid gap-2">
-                  <div className="grid gap-2 md:grid-cols-3">
-                    {deployDoctor.checks.map((check) => (
-                      <div
-                        key={check.id}
-                        className="rounded border border-black/10 bg-white/70 p-2 dark:border-white/10 dark:bg-white/[0.04]"
-                      >
-                        <div className="flex items-center gap-2 font-semibold">
-                          {check.status === 'pass' ? (
-                            <CheckCircle2 size={14} className="text-spruce dark:text-[#9be8d7]" />
-                          ) : (
-                            <AlertTriangle size={14} className="text-amber" />
-                          )}
-                          {check.label}
-                        </div>
-                        <div className="mt-1 break-all text-black/55 dark:text-[#b8c7c1]">
-                          {check.detail}
-                        </div>
-                      </div>
-                    ))}
-                    </div>
-
-                    {deployDoctor.requirements.length > 0 ? (
-                      <div className="grid gap-2">
-                        <div className="font-semibold">Command requirements</div>
-                        {deployDoctor.requirements.map((requirement) => (
-                          <div
-                            key={requirement.id}
-                            className={`rounded border p-3 ${
-                              requirement.status === 'blocked'
-                                ? 'border-coral/30 bg-coral/10'
-                                : requirement.status === 'needs_user'
-                                  ? 'border-amber/30 bg-amber/10'
-                                  : 'border-black/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]'
-                            }`}
-                          >
-                            <div className="flex items-start gap-2">
-                              {requirement.status === 'ready' ? (
-                                <CheckCircle2 size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
-                              ) : requirement.status === 'auto' ? (
-                                <RefreshCw size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
-                              ) : requirement.status === 'blocked' ? (
-                                <X size={15} className="mt-0.5 text-coral" />
-                              ) : (
-                                <AlertTriangle size={15} className="mt-0.5 text-amber" />
-                              )}
-                              <div className="min-w-0 flex-1">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <span className="font-semibold">{requirement.label}</span>
-                                  <span className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-black/45 dark:border-white/15 dark:text-[#a9bbb4]">
-                                    {requirement.status === 'ready'
-                                      ? 'ready'
-                                      : requirement.status === 'auto'
-                                        ? 'auto'
-                                        : requirement.status === 'blocked'
-                                          ? 'needs fix'
-                                          : 'review'}
-                                  </span>
-                                </div>
-                                <div className="mt-1 break-words text-black/60 dark:text-[#b8c7c1]">
-                                  {requirement.detail}
-                                </div>
-                                {requirement.commands.length > 0 ? (
-                                  <div className="mt-2 grid gap-1">
-                                    {requirement.commands.map((command) => (
-                                      <div
-                                        key={command}
-                                        className="flex items-center gap-2 rounded bg-black/[0.04] px-2 py-1.5 font-mono text-[11px] dark:bg-black/25"
-                                      >
-                                        <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre">
-                                          {command}
-                                        </code>
-                                        <button
-                                          type="button"
-                                          className="grid h-7 w-7 shrink-0 place-items-center rounded text-black/45 transition hover:bg-black/10 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
-                                          onClick={() => void copyCommand(command)}
-                                          title="Copy command"
-                                          aria-label="Copy command"
-                                        >
-                                          <Clipboard size={14} />
-                                        </button>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {deployDoctor.grantSteps.length > 0 ? (
-                      <div className="grid gap-2">
-                      {deployDoctor.grantSteps.map((step) => (
-                        <div
-                          key={step.title}
-                          className="rounded border border-amber/30 bg-amber/10 p-3"
-                        >
-                          <div className="flex items-start gap-2">
-                            <Terminal size={15} className="mt-0.5 text-amber" />
-                            <div>
-                              <div className="font-semibold">{step.title}</div>
-                              <div className="mt-1 text-black/60 dark:text-[#d5caa2]">
-                                {step.description}
-                              </div>
-                            </div>
-                          </div>
-                          {step.commands.length > 0 ? (
-                            <div className="mt-2 grid gap-1">
-                              {step.commands.map((command) => (
-                                <div
-                                  key={command}
-                                  className="flex items-center gap-2 rounded bg-black/[0.04] px-2 py-1.5 font-mono text-[11px] dark:bg-black/25"
-                                >
-                                  <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre">
-                                    {command}
-                                  </code>
-                                  <button
-                                    type="button"
-                                    className="grid h-7 w-7 shrink-0 place-items-center rounded text-black/45 transition hover:bg-black/10 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
-                                    onClick={() => void copyCommand(command)}
-                                    title="Copy command"
-                                    aria-label="Copy command"
-                                  >
-                                    <Clipboard size={14} />
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-
-            <div className="grid gap-3">
+              <div className="grid gap-3">
               <div>
                 <span className="label">Deploy method</span>
                 <div className="grid gap-2 md:grid-cols-4">
@@ -2158,6 +2172,13 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   disabled={selectedDeployMethod.status !== 'available'}
                 />
               </div>
+
+              <DeployHostPermissionSection
+                deployDoctor={deployDoctor}
+                checkingDeployPermission={checkingDeployPermission}
+                checkDeployPermission={checkDeployPermission}
+                copyCommand={copyCommand}
+              />
 
               <div>
                 <span className="label">Publish</span>
