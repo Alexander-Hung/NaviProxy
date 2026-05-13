@@ -177,6 +177,168 @@ function normalizeTags(tags: string[]) {
   return [...new Set(tags.map((tag) => tag.trim()).filter(Boolean))].slice(0, 12);
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function firstValue(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    if (record[key] !== undefined && record[key] !== null && record[key] !== '') {
+      return record[key];
+    }
+  }
+
+  return undefined;
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string'
+    ? value
+    : typeof value === 'number'
+      ? String(value)
+      : undefined;
+}
+
+function booleanValue(value: unknown, fallback = false) {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+
+  if (typeof value === 'string') {
+    return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+  }
+
+  return fallback;
+}
+
+function tagsValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => {
+      const tag = stringValue(item)?.trim();
+      return tag ? [tag] : [];
+    });
+  }
+
+  if (typeof value === 'string') {
+    return value.split(',').map((tag) => tag.trim()).filter(Boolean);
+  }
+
+  return [];
+}
+
+function normalizeTargetUrl(value: unknown, fallbackPort: unknown) {
+  const raw = stringValue(value);
+
+  if (raw?.startsWith('http://') || raw?.startsWith('https://')) {
+    return raw;
+  }
+
+  if (raw && /^\d+$/.test(raw)) {
+    return `http://127.0.0.1:${raw}`;
+  }
+
+  const port = stringValue(fallbackPort);
+
+  if (port && /^\d+$/.test(port)) {
+    return `http://127.0.0.1:${port}`;
+  }
+
+  return 'http://127.0.0.1:80';
+}
+
+function coerceImportedAppInput(input: unknown) {
+  const record = asRecord(input);
+  const name =
+    stringValue(firstValue(record, ['name', 'title', 'label', 'displayName'])) ??
+    'Imported App';
+  const slug =
+    stringValue(firstValue(record, ['slug', 'id', 'key'])) ??
+    slugify(name);
+  const routeMode =
+    firstValue(record, ['routeMode', 'route_mode']) === 'subpath'
+      ? 'subpath'
+      : 'subdomain';
+  const publicHost =
+    stringValue(firstValue(record, ['publicHost', 'public_host', 'host', 'domain'])) ??
+    `${slugify(slug || name) || 'app'}.lab.home`;
+
+  return {
+    id: stringValue(firstValue(record, ['id', 'appId', 'app_id'])),
+    name,
+    slug,
+    iconType:
+      firstValue(record, ['iconType', 'icon_type']) === 'emoji' ||
+      firstValue(record, ['iconType', 'icon_type']) === 'builtin'
+        ? firstValue(record, ['iconType', 'icon_type'])
+        : 'url',
+    iconValue:
+      stringValue(firstValue(record, ['iconValue', 'icon_value', 'icon', 'iconUrl', 'icon_url'])) ??
+      null,
+    targetUrl: normalizeTargetUrl(
+      firstValue(record, ['targetUrl', 'target_url', 'target', 'url', 'origin']),
+      firstValue(record, ['port', 'hostPort', 'host_port'])
+    ),
+    routeMode,
+    publicHost,
+    publicPath:
+      routeMode === 'subpath'
+        ? stringValue(firstValue(record, ['publicPath', 'public_path', 'path'])) ?? `/${slugify(slug || name) || 'app'}`
+        : null,
+    enabled: booleanValue(firstValue(record, ['enabled', 'isEnabled']), true),
+    sortOrder: Number(firstValue(record, ['sortOrder', 'sort_order']) ?? 0),
+    category:
+      stringValue(firstValue(record, ['category', 'group', 'folder'])) ??
+      null,
+    tags: tagsValue(firstValue(record, ['tags', 'labels'])),
+    favorite: booleanValue(firstValue(record, ['favorite', 'isFavorite']))
+  };
+}
+
+function coerceImportInput(input: unknown) {
+  if (Array.isArray(input)) {
+    return {
+      mode: 'replace',
+      apps: input.map(coerceImportedAppInput)
+    };
+  }
+
+  const record = asRecord(input);
+  const apps =
+    firstValue(record, ['apps', 'items', 'services', 'applications']) ??
+    firstValue(asRecord(record.data), ['apps', 'items', 'services', 'applications']) ??
+    firstValue(asRecord(record.payload), ['apps', 'items', 'services', 'applications']);
+
+  return {
+    mode: 'replace',
+    apps: Array.isArray(apps) ? apps.map(coerceImportedAppInput) : []
+  };
+}
+
+function coerceDeploymentBackup(input: unknown) {
+  const record = asRecord(input);
+
+  return {
+    appId: stringValue(firstValue(record, ['appId', 'app_id', 'app'])) ?? '',
+    provider: firstValue(record, ['provider', 'type']) === 'docker_compose'
+      ? 'docker_compose'
+      : 'docker',
+    resourceId:
+      stringValue(firstValue(record, ['resourceId', 'resource_id', 'id', 'path'])) ??
+      '',
+    resourceName:
+      stringValue(firstValue(record, ['resourceName', 'resource_name', 'name', 'containerName', 'container_name'])) ??
+      '',
+    deployInput: firstValue(record, ['deployInput', 'deploy_input', 'input']) ?? null,
+    createdAt: stringValue(firstValue(record, ['createdAt', 'created_at']))
+  };
+}
+
 function normalizeAppInput(input: unknown, fallbackSlug?: string): AppInput {
   const parsed = appInputSchema.parse(input);
   const url = new URL(parsed.targetUrl);
@@ -509,7 +671,7 @@ export class AppsService {
   }
 
   private prepareImportedApps(input: unknown) {
-    const parsed = importSchema.parse(input);
+    const parsed = importSchema.parse(coerceImportInput(input));
     const now = new Date().toISOString();
     const apps = parsed.apps.map((appInput, index) => {
       const normalized = normalizeAppInput(appInput);
@@ -571,7 +733,7 @@ export class AppsService {
       settings: input.settingsService.getAll()
     };
     const deployments = input.deployments
-      ? deploymentBackupSchema.parse(input.deployments)
+      ? deploymentBackupSchema.parse(input.deployments.map(coerceDeploymentBackup))
       : [];
 
     const savedApps = this.db.transaction(() => {

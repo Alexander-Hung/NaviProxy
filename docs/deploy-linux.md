@@ -161,7 +161,10 @@ or a wildcard record:
 - Back up `/opt/the-containers/data/the-containers.sqlite`, the deployment data
   under `DEPLOYMENTS_PATH`, and any Docker volumes or bind mount directories used
   by your apps. The Admin backup export includes app records, settings, managed
-  deployment records, and redeploy metadata, but it does not include container
-  data volumes.
+  deployment records, redeploy metadata, managed deployment files such as
+  Compose project files, and readable Docker bind mount or named volume data.
+  Review skipped files in the exported backup and separately back up unreadable
+  Docker Desktop VM volumes, skipped large files, external databases, DNS
+  records, and router rules.
 - See [migration-checklist.md](migration-checklist.md) before moving The
   Containers to a new host.
