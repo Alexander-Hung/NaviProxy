@@ -93,8 +93,8 @@ const deployMethods: Array<{
   {
     id: 'docker_compose',
     title: 'Docker Compose',
-    detail: 'compose.yml or compose command',
-    status: 'planned'
+    detail: 'Paste compose.yml content',
+    status: 'available'
   },
   {
     id: 'github_auto',
@@ -134,6 +134,55 @@ const deployMethods: Array<{
   }
 ];
 
+const deployOptionValueNames = new Set([
+  '--add-host',
+  '--cap-add',
+  '--cap-drop',
+  '--device',
+  '--dns',
+  '--entrypoint',
+  '--env',
+  '--env-file',
+  '--expose',
+  '--hostname',
+  '--label',
+  '--memory',
+  '--mount',
+  '--name',
+  '--network',
+  '--net',
+  '--platform',
+  '--publish',
+  '--restart',
+  '--user',
+  '--volume',
+  '--workdir'
+]);
+
+const deployShortOptionsWithValues = new Set(['e', 'h', 'l', 'm', 'p', 'u', 'v', 'w']);
+
+function expandDeployShortOptionGroup(token: string) {
+  if (!/^-[A-Za-z]{2,}$/.test(token)) {
+    return [token];
+  }
+
+  const flags = token.slice(1).split('');
+  const firstValueFlag = flags.findIndex((flag) => deployShortOptionsWithValues.has(flag));
+
+  if (firstValueFlag === -1) {
+    return flags.map((flag) => `-${flag}`);
+  }
+
+  if (firstValueFlag === flags.length - 1) {
+    return [
+      ...flags.slice(0, firstValueFlag).map((flag) => `-${flag}`),
+      `-${flags[firstValueFlag]}`
+    ];
+  }
+
+  return [token];
+}
+
 function tokenizeDeployCommand(command: string) {
   const tokens: string[] = [];
   let current = '';
@@ -147,7 +196,14 @@ function tokenizeDeployCommand(command: string) {
       continue;
     }
 
-    if (char === '\\' && quote !== "'") {
+    if (
+      char === '\\' &&
+      quote !== "'" &&
+      !/^[A-Za-z]:/.test(current) &&
+      !/[=,][A-Za-z]:/.test(current) &&
+      !current.startsWith('\\') &&
+      current !== ''
+    ) {
       escaped = true;
       continue;
     }
@@ -177,7 +233,7 @@ function tokenizeDeployCommand(command: string) {
     tokens.push(current);
   }
 
-  return tokens;
+  return tokens.flatMap(expandDeployShortOptionGroup);
 }
 
 function parsePublishPort(raw: string) {
@@ -289,7 +345,25 @@ function parseDeployCommand(command: string) {
       continue;
     }
 
+    if (!image && token.startsWith('--publish=')) {
+      continue;
+    }
+
+    if (!image && token.startsWith('-p') && token.length > 2) {
+      continue;
+    }
+
     if (!image && token.startsWith('-')) {
+      const option = token.includes('=') ? token.slice(0, token.indexOf('=')) : token;
+
+      if (
+        !token.includes('=') &&
+        (deployOptionValueNames.has(option) ||
+          (option.length === 2 && deployShortOptionsWithValues.has(option[1])))
+      ) {
+        index += 1;
+      }
+
       continue;
     }
 
@@ -305,6 +379,208 @@ function parseDeployCommand(command: string) {
     name,
     slug: slugifyDeployName(name),
     port: parsePublishPortFromCommand(command)
+  };
+}
+
+function looksLikeComposeYaml(value: string) {
+  return /(^|\n)\s*services\s*:/i.test(value);
+}
+
+type ComposeServiceBlock = {
+  name: string;
+  content: string;
+};
+
+function composeServiceBlocks(compose: string) {
+  const lines = compose.split('\n');
+  const servicesIndex = lines.findIndex((line) => /^\s*services\s*:/i.test(line));
+  const blocks: ComposeServiceBlock[] = [];
+  let current: ComposeServiceBlock | null = null;
+
+  for (const line of lines.slice(Math.max(servicesIndex + 1, 0))) {
+    const serviceMatch = line.match(/^\s{2}([A-Za-z0-9._-]+)\s*:\s*(?:#.*)?$/);
+
+    if (serviceMatch) {
+      if (current) {
+        blocks.push(current);
+      }
+
+      current = {
+        name: serviceMatch[1],
+        content: ''
+      };
+      continue;
+    }
+
+    if (current) {
+      current.content += `${line}\n`;
+    }
+  }
+
+  if (current) {
+    blocks.push(current);
+  }
+
+  return blocks;
+}
+
+function composeBlockImage(block: ComposeServiceBlock) {
+  return block.content.match(/^\s*image\s*:\s*['"]?([^'"\s#]+)['"]?/m)?.[1] ?? '';
+}
+
+function composeBlockContainerName(block: ComposeServiceBlock) {
+  return block.content.match(/^\s*container_name\s*:\s*['"]?([^'"\s#]+)['"]?/m)?.[1] ?? '';
+}
+
+function composeBlockUsesHostNetwork(block: ComposeServiceBlock) {
+  return /^\s*(network_mode|network)\s*:\s*['"]?host['"]?\s*(?:#.*)?$/m.test(block.content);
+}
+
+function parseComposePort(compose: string) {
+  for (const line of compose.split('\n')) {
+    const match = line.match(/^\s*-\s*['"]?([^'"\s#]+)['"]?/);
+
+    if (!match) {
+      continue;
+    }
+
+    const parsed = parsePublishPort(match[1]);
+
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  const target = compose.match(/^\s*(?:-\s*)?target\s*:\s*(\d+)\s*$/m)?.[1];
+  const published = compose.match(/^\s*published\s*:\s*(\d+)\s*$/m)?.[1];
+
+  if (target) {
+    return {
+      hostPort: published ? Number(published) : null,
+      containerPort: Number(target)
+    };
+  }
+
+  return null;
+}
+
+function parseComposeExposePort(compose: string) {
+  for (const line of compose.split('\n')) {
+    const match = line.match(/^\s*-\s*['"]?(\d+)(?:\/tcp)?['"]?\s*$/);
+
+    if (match) {
+      return Number(match[1]);
+    }
+  }
+
+  const expose = compose.match(/^\s*expose\s*:\s*['"]?(\d+)['"]?\s*$/m)?.[1];
+
+  return expose ? Number(expose) : null;
+}
+
+function inferComposePort(compose: string, image: string, serviceName: string) {
+  const exposed = parseComposeExposePort(compose);
+
+  if (exposed) {
+    return {
+      hostPort: null,
+      containerPort: exposed
+    };
+  }
+
+  const text = `${image} ${serviceName}`.toLowerCase();
+  const knownPorts: Array<[RegExp, number]> = [
+    [/postgres|postgis/, 5432],
+    [/mysql|mariadb/, 3306],
+    [/redis|valkey/, 6379],
+    [/mongo/, 27017],
+    [/grafana/, 3000],
+    [/prometheus/, 9090],
+    [/upsnap/, 8090],
+    [/uptime-kuma/, 3001],
+    [/homeassistant|home-assistant/, 8123],
+    [/jellyfin/, 8096],
+    [/plex/, 32400],
+    [/portainer/, 9000],
+    [/traefik|nginx|caddy|apache|httpd|whoami|web|app/, 80]
+  ];
+
+  return {
+    hostPort: null,
+    containerPort: knownPorts.find(([pattern]) => pattern.test(text))?.[1] ?? 80
+  };
+}
+
+function isDatabaseLikeComposeService(text: string) {
+  return /postgres|postgis|mysql|mariadb|redis|valkey|mongo|clickhouse|meili|qdrant|elastic|opensearch|rabbitmq|nats/i.test(text);
+}
+
+function isWebLikeComposeService(text: string) {
+  return /web|app|api|server|frontend|backend|ui|admin|dashboard|http|nginx|caddy|apache|httpd|traefik|whoami|grafana|prometheus|upsnap|uptime-kuma|homeassistant|home-assistant|jellyfin|plex|portainer/i.test(text);
+}
+
+function isLikelyWebComposePort(port: number | null | undefined) {
+  return Boolean(
+    port &&
+      (port === 80 ||
+        port === 443 ||
+        port === 3000 ||
+        port === 3001 ||
+        port === 5000 ||
+        port === 5173 ||
+        (port >= 8000 && port <= 8999) ||
+        port === 9000)
+  );
+}
+
+function selectComposeBlock(compose: string) {
+  const blocks = composeServiceBlocks(compose);
+
+  return blocks
+    .map((block, index) => {
+      const image = composeBlockImage(block);
+      const containerName = composeBlockContainerName(block);
+      const port = parseComposePort(block.content) ?? inferComposePort(block.content, image, block.name);
+      const text = `${block.name} ${image} ${containerName}`.toLowerCase();
+      const score =
+        (isDatabaseLikeComposeService(text) ? -100 : 0) +
+        (isWebLikeComposeService(text) ? 90 : 0) +
+        (isLikelyWebComposePort(port.containerPort) ? 70 : 0) +
+        (port.hostPort ? 30 : 0) -
+        index;
+
+      return {
+        block,
+        image,
+        containerName,
+        port,
+        score
+      };
+    })
+    .sort((left, right) => right.score - left.score)[0];
+}
+
+function parseComposeDeployInput(compose: string) {
+  const selected = selectComposeBlock(compose);
+  const image = selected?.image ?? '';
+  const serviceName = selected?.block.name ?? '';
+  const name =
+    selected?.containerName ||
+    serviceName ||
+    nameFromDeployImage(image);
+  const port =
+    selected?.port ??
+    inferComposePort(compose, image, serviceName);
+
+  return {
+    name,
+    slug: slugifyDeployName(name),
+    port: selected && composeBlockUsesHostNetwork(selected.block)
+      ? {
+          hostPort: port.containerPort,
+          containerPort: port.containerPort
+        }
+      : port
   };
 }
 
@@ -663,25 +939,33 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   }
 
   function updateDeployCommand(command: string) {
-    const parsed = parseDeployCommand(command);
+    const isCompose = looksLikeComposeYaml(command);
+    const parsed = isCompose
+      ? parseComposeDeployInput(command)
+      : parseDeployCommand(command);
 
     setDeployForm((current) => ({
       ...current,
       command,
-      ...(parsed.name
+      ...(isCompose && current.method === 'docker_run'
         ? {
-            name: parsed.name
+            method: 'docker_compose' as const
           }
         : {}),
-      ...(parsed.slug
+      ...(current.method === 'docker_run' || current.method === 'docker_compose' || isCompose
         ? {
-            publicHost: `${parsed.slug}.${hostSuffixFrom(current.publicHost)}`
-          }
-        : {}),
-      ...(parsed.port
-        ? {
-            hostPort: parsed.port.hostPort,
-            containerPort: parsed.port.containerPort
+            ...(parsed.name ? { name: parsed.name } : {}),
+            ...(parsed.slug
+              ? {
+                  publicHost: `${parsed.slug}.${hostSuffixFrom(current.publicHost)}`
+                }
+              : {}),
+            ...(parsed.port
+              ? {
+                  hostPort: parsed.port.hostPort,
+                  containerPort: parsed.port.containerPort
+                }
+              : {})
           }
         : {})
     }));
@@ -1012,8 +1296,8 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   }
 
   async function previewDeploy() {
-    if (deployForm.method !== 'docker_run') {
-      setError(`${selectedDeployMethod.title} is planned. Docker run is available now.`);
+    if (selectedDeployMethod.status !== 'available') {
+      setError(`${selectedDeployMethod.title} is planned. Docker run and Docker Compose are available now.`);
       return;
     }
 
@@ -1033,8 +1317,8 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   }
 
   async function deployDockerRun() {
-    if (deployForm.method !== 'docker_run') {
-      setError(`${selectedDeployMethod.title} is planned. Docker run is available now.`);
+    if (selectedDeployMethod.status !== 'available') {
+      setError(`${selectedDeployMethod.title} is planned. Docker run and Docker Compose are available now.`);
       return;
     }
 
@@ -1645,13 +1929,13 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   <div>
                     <div className="font-semibold">Host permission</div>
                     <div className="text-black/50 dark:text-[#a9bbb4]">
-	                      {deployDoctor
-	                        ? deployDoctor.ok
-	                          ? deployDoctor.userHelpRequired
-	                            ? 'Docker is reachable. This command still needs user review.'
-	                            : 'Docker can run this command without extra user help.'
-	                          : 'This command needs host authorization before deployment can run.'
-	                        : 'Check whether this process can execute Docker.'}
+                        {deployDoctor
+                          ? deployDoctor.ok
+                            ? deployDoctor.userHelpRequired
+                              ? 'Docker is reachable. This command still needs user review.'
+                              : 'Docker can run this command without extra user help.'
+                            : 'This command needs host authorization before deployment can run.'
+                          : 'Check whether this process can execute Docker.'}
                     </div>
                   </div>
                 </div>
@@ -1690,80 +1974,80 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                         </div>
                       </div>
                     ))}
-	                  </div>
+                    </div>
 
-	                  {deployDoctor.requirements.length > 0 ? (
-	                    <div className="grid gap-2">
-	                      <div className="font-semibold">Command requirements</div>
-	                      {deployDoctor.requirements.map((requirement) => (
-	                        <div
-	                          key={requirement.id}
-	                          className={`rounded border p-3 ${
-	                            requirement.status === 'blocked'
-	                              ? 'border-coral/30 bg-coral/10'
-	                              : requirement.status === 'needs_user'
-	                                ? 'border-amber/30 bg-amber/10'
-	                                : 'border-black/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]'
-	                          }`}
-	                        >
-	                          <div className="flex items-start gap-2">
-	                            {requirement.status === 'ready' ? (
-	                              <CheckCircle2 size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
-	                            ) : requirement.status === 'auto' ? (
-	                              <RefreshCw size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
-	                            ) : requirement.status === 'blocked' ? (
-	                              <X size={15} className="mt-0.5 text-coral" />
-	                            ) : (
-	                              <AlertTriangle size={15} className="mt-0.5 text-amber" />
-	                            )}
-	                            <div className="min-w-0 flex-1">
-	                              <div className="flex flex-wrap items-center gap-2">
-	                                <span className="font-semibold">{requirement.label}</span>
-	                                <span className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-black/45 dark:border-white/15 dark:text-[#a9bbb4]">
-	                                  {requirement.status === 'ready'
-	                                    ? 'ready'
-	                                    : requirement.status === 'auto'
-	                                      ? 'auto'
-	                                      : requirement.status === 'blocked'
-	                                        ? 'needs fix'
-	                                        : 'review'}
-	                                </span>
-	                              </div>
-	                              <div className="mt-1 break-words text-black/60 dark:text-[#b8c7c1]">
-	                                {requirement.detail}
-	                              </div>
-	                              {requirement.commands.length > 0 ? (
-	                                <div className="mt-2 grid gap-1">
-	                                  {requirement.commands.map((command) => (
-	                                    <div
-	                                      key={command}
-	                                      className="flex items-center gap-2 rounded bg-black/[0.04] px-2 py-1.5 font-mono text-[11px] dark:bg-black/25"
-	                                    >
-	                                      <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre">
-	                                        {command}
-	                                      </code>
-	                                      <button
-	                                        type="button"
-	                                        className="grid h-7 w-7 shrink-0 place-items-center rounded text-black/45 transition hover:bg-black/10 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
-	                                        onClick={() => void copyCommand(command)}
-	                                        title="Copy command"
-	                                        aria-label="Copy command"
-	                                      >
-	                                        <Clipboard size={14} />
-	                                      </button>
-	                                    </div>
-	                                  ))}
-	                                </div>
-	                              ) : null}
-	                            </div>
-	                          </div>
-	                        </div>
-	                      ))}
-	                    </div>
-	                  ) : null}
+                    {deployDoctor.requirements.length > 0 ? (
+                      <div className="grid gap-2">
+                        <div className="font-semibold">Command requirements</div>
+                        {deployDoctor.requirements.map((requirement) => (
+                          <div
+                            key={requirement.id}
+                            className={`rounded border p-3 ${
+                              requirement.status === 'blocked'
+                                ? 'border-coral/30 bg-coral/10'
+                                : requirement.status === 'needs_user'
+                                  ? 'border-amber/30 bg-amber/10'
+                                  : 'border-black/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]'
+                            }`}
+                          >
+                            <div className="flex items-start gap-2">
+                              {requirement.status === 'ready' ? (
+                                <CheckCircle2 size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
+                              ) : requirement.status === 'auto' ? (
+                                <RefreshCw size={15} className="mt-0.5 text-spruce dark:text-[#9be8d7]" />
+                              ) : requirement.status === 'blocked' ? (
+                                <X size={15} className="mt-0.5 text-coral" />
+                              ) : (
+                                <AlertTriangle size={15} className="mt-0.5 text-amber" />
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-semibold">{requirement.label}</span>
+                                  <span className="rounded border border-black/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-black/45 dark:border-white/15 dark:text-[#a9bbb4]">
+                                    {requirement.status === 'ready'
+                                      ? 'ready'
+                                      : requirement.status === 'auto'
+                                        ? 'auto'
+                                        : requirement.status === 'blocked'
+                                          ? 'needs fix'
+                                          : 'review'}
+                                  </span>
+                                </div>
+                                <div className="mt-1 break-words text-black/60 dark:text-[#b8c7c1]">
+                                  {requirement.detail}
+                                </div>
+                                {requirement.commands.length > 0 ? (
+                                  <div className="mt-2 grid gap-1">
+                                    {requirement.commands.map((command) => (
+                                      <div
+                                        key={command}
+                                        className="flex items-center gap-2 rounded bg-black/[0.04] px-2 py-1.5 font-mono text-[11px] dark:bg-black/25"
+                                      >
+                                        <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre">
+                                          {command}
+                                        </code>
+                                        <button
+                                          type="button"
+                                          className="grid h-7 w-7 shrink-0 place-items-center rounded text-black/45 transition hover:bg-black/10 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+                                          onClick={() => void copyCommand(command)}
+                                          title="Copy command"
+                                          aria-label="Copy command"
+                                        >
+                                          <Clipboard size={14} />
+                                        </button>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
 
-	                  {deployDoctor.grantSteps.length > 0 ? (
-	                    <div className="grid gap-2">
+                    {deployDoctor.grantSteps.length > 0 ? (
+                      <div className="grid gap-2">
                       {deployDoctor.grantSteps.map((step) => (
                         <div
                           key={step.title}
@@ -1855,6 +2139,8 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                 <label className="label" htmlFor="deployCommand">
                   {deployForm.method === 'docker_run'
                     ? 'Docker command'
+                    : deployForm.method === 'docker_compose'
+                      ? 'Compose file'
                     : `${selectedDeployMethod.title} input`}
                 </label>
                 <textarea
@@ -1865,9 +2151,11 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   placeholder={
                     deployForm.method === 'docker_run'
                       ? 'docker run -d --name app -p 8080:80 image:tag'
+                      : deployForm.method === 'docker_compose'
+                        ? 'services:\n  app:\n    image: nginx:alpine\n    ports:\n      - "8080:80"'
                       : 'This deploy method is planned'
                   }
-                  disabled={deployForm.method !== 'docker_run'}
+                  disabled={selectedDeployMethod.status !== 'available'}
                 />
               </div>
 
@@ -2121,7 +2409,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   onClick={() => void previewDeploy()}
                   disabled={
                     previewingDeploy ||
-                    deployForm.method !== 'docker_run' ||
+                    selectedDeployMethod.status !== 'available' ||
                     !deployForm.command.trim()
                   }
                 >
@@ -2134,7 +2422,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   disabled={
                     deploying ||
                     checkingDeployPermission ||
-                    deployForm.method !== 'docker_run' ||
+                    selectedDeployMethod.status !== 'available' ||
                     !deployForm.command.trim() ||
                     deployDoctor?.ok === false
                   }

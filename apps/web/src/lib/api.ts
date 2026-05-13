@@ -139,6 +139,7 @@ export type DeployPayload = {
 };
 
 export type DeployPlan = {
+  method: 'docker_run' | 'docker_compose';
   containerName: string;
   image: string;
   publishMode: DeployPayload['publishMode'];
@@ -322,7 +323,7 @@ export const api = {
       ok: true;
       proxySync?: ProxySync;
       deployment?: {
-        provider: 'docker';
+        provider: 'docker' | 'docker_compose';
         resourceName: string;
       } | null;
     }>(`/api/apps/${id}`, {

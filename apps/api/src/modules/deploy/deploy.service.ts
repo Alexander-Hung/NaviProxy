@@ -6,6 +6,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import { config } from '../../config.js';
 import type { NaviDatabase } from '../../db/database.js';
@@ -15,7 +16,16 @@ import { DeploymentsRepo } from './deployments.repo.js';
 const execFileAsync = promisify(execFile);
 
 const deployInputSchema = z.object({
-  method: z.enum(['docker_run']).default('docker_run'),
+  method: z.enum([
+    'docker_run',
+    'docker_compose',
+    'github_auto',
+    'static_site',
+    'node_app',
+    'python_app',
+    'binary_service',
+    'custom_command'
+  ]).default('docker_run'),
   command: z.string().trim().min(1).max(8000),
   publishMode: z.enum(['reverse_proxy', 'public_domain_reverse_proxy']).default('reverse_proxy'),
   name: z.string().trim().min(1).max(80).optional(),
@@ -37,6 +47,7 @@ type PublishedPort = {
 };
 
 type DockerRunPlan = {
+  method: 'docker_run' | 'docker_compose';
   containerName: string;
   image: string;
   publishMode: 'reverse_proxy' | 'public_domain_reverse_proxy';
@@ -45,6 +56,9 @@ type DockerRunPlan = {
   protocol: string;
   targetUrl: string;
   hostMounts: HostMount[];
+  composeFilePath?: string;
+  composeProjectDir?: string;
+  composeContent?: string;
   appPayload: {
     name: string;
     iconType: 'builtin';
@@ -82,6 +96,24 @@ type DockerInspectContainer = {
 type HostMount = {
   source: string;
   target: string | null;
+  baseDir?: string;
+};
+
+type JsonRecord = Record<string, unknown>;
+
+type ComposeConfig = {
+  config: JsonRecord;
+  services: Array<[string, JsonRecord]>;
+};
+
+type ComposeServiceSelection = {
+  name: string;
+  service: JsonRecord;
+  image: string;
+  containerName: string | null;
+  port: PublishedPort | null;
+  exposePort: number | null;
+  hostNetwork: boolean;
 };
 
 type DeployDoctorCheck = {
@@ -107,6 +139,16 @@ type DeployDoctorGrantStep = {
 };
 
 const deployDoctorInputSchema = z.object({
+  method: z.enum([
+    'docker_run',
+    'docker_compose',
+    'github_auto',
+    'static_site',
+    'node_app',
+    'python_app',
+    'binary_service',
+    'custom_command'
+  ]).default('docker_run'),
   command: z.string().trim().max(8000).optional(),
   publishMode: z.enum(['reverse_proxy', 'public_domain_reverse_proxy']).default('reverse_proxy'),
   publicHost: z.string().trim().max(253).optional(),
@@ -219,6 +261,15 @@ function isContainerNameConflict(message: string) {
   return /container name ".+?" is already in use/i.test(message);
 }
 
+function isDockerComposeUnavailable(message: string) {
+  return (
+    /unknown command: docker compose/i.test(message) ||
+    /unknown shorthand flag: 'p' in -p/i.test(message) ||
+    /Invalid Plugins:[\s\S]*compose/i.test(message) ||
+    /docker-compose: executable file not found/i.test(message)
+  );
+}
+
 async function commandExists(command: string) {
   try {
     await execFileAsync(command, ['--version'], {
@@ -229,6 +280,10 @@ async function commandExists(command: string) {
   } catch {
     return false;
   }
+}
+
+async function legacyDockerComposeExists() {
+  return commandExists('docker-compose');
 }
 
 async function commandOutput(command: string, args: string[], timeout = 10_000) {
@@ -486,6 +541,61 @@ async function runDockerCommand(args: string[], options: { timeout?: number } = 
   }
 }
 
+async function runDockerComposeCommand(args: string[], options: { timeout?: number } = {}) {
+  try {
+    return await runDockerCommand(['compose', ...args], options);
+  } catch (error) {
+    const detail = commandDetail(error);
+
+    if (!isDockerComposeUnavailable(detail)) {
+      throw error;
+    }
+
+    if (await legacyDockerComposeExists()) {
+      try {
+        return await execFileAsync('docker-compose', args, {
+          timeout: options.timeout ?? 240_000,
+          maxBuffer: 1024 * 1024,
+          env: process.env
+        });
+      } catch (legacyError) {
+        throw new DeployExecutionError(commandDetail(legacyError) || 'Docker Compose failed.');
+      }
+    }
+
+    throw new DeployRuntimeUnavailableError(
+      'Docker Compose is not available. Install the Docker Compose plugin so "docker compose version" works, or install legacy docker-compose. If Docker Desktop was removed, also remove broken ~/.docker/cli-plugins/docker-compose symlinks.'
+    );
+  }
+}
+
+async function dockerComposeRuntimeStatus() {
+  try {
+    const { stdout } = await runDockerCommand(['compose', 'version'], { timeout: 30_000 });
+
+    return {
+      available: true,
+      detail: stdout.trim() || 'docker compose is available'
+    };
+  } catch (error) {
+    const detail = commandDetail(error);
+
+    if (isDockerComposeUnavailable(detail) && await legacyDockerComposeExists()) {
+      return {
+        available: true,
+        detail: 'Legacy docker-compose is available.'
+      };
+    }
+
+    return {
+      available: false,
+      detail: isDockerComposeUnavailable(detail)
+        ? 'Docker Compose plugin was not found or is broken, and legacy docker-compose was not found.'
+        : detail
+    };
+  }
+}
+
 async function inspectContainer(containerName: string) {
   const { stdout } = await runDockerCommand(['inspect', containerName]);
   const parsed = JSON.parse(stdout) as DockerInspectContainer[];
@@ -662,14 +772,14 @@ function looksLikeHostPath(value: string) {
   );
 }
 
-function expandHostPath(value: string) {
+function expandHostPath(value: string, baseDir = process.cwd()) {
   const expanded = value === '~'
     ? os.homedir()
     : value.startsWith('~/')
       ? path.join(os.homedir(), value.slice(2))
       : value;
 
-  return path.resolve(process.cwd(), expanded);
+  return path.resolve(baseDir, expanded);
 }
 
 function splitDockerVolumeSpec(value: string) {
@@ -772,7 +882,7 @@ async function ensureHostMountsWritable(mounts: HostMount[]) {
   const uniqueSources = Array.from(new Map(mounts.map((mount) => [mount.source, mount])).values());
 
   for (const mount of uniqueSources) {
-    const source = expandHostPath(mount.source);
+    const source = expandHostPath(mount.source, mount.baseDir);
 
     try {
       await fs.access(source, fsConstants.R_OK | fsConstants.W_OK);
@@ -808,7 +918,7 @@ function shellQuote(value: string) {
 }
 
 function isDockerSocketMount(mount: HostMount) {
-  const source = expandHostPath(mount.source);
+  const source = expandHostPath(mount.source, mount.baseDir);
 
   return source === '/var/run/docker.sock' || source.endsWith('/docker.sock');
 }
@@ -887,7 +997,7 @@ function inspectDeviceCommand(device: string) {
 }
 
 async function mountRequirement(mount: HostMount): Promise<DeployPermissionRequirement> {
-  const source = expandHostPath(mount.source);
+  const source = expandHostPath(mount.source, mount.baseDir);
 
   if (isDockerSocketMount(mount)) {
     return {
@@ -1103,10 +1213,89 @@ async function commandPermissionRequirements(input: unknown) {
   }
 
   try {
+    if (parsedInput.method === 'docker_compose') {
+      if (!looksLikeComposeYaml(command)) {
+        requirements.push({
+          id: 'compose-input',
+          label: 'Compose file',
+          status: 'blocked',
+          userHelpRequired: true,
+          detail: 'Paste docker-compose.yml or compose.yml content.',
+          commands: []
+        });
+        return requirements;
+      }
+
+      const service = selectComposeService(command);
+      const selectedPublishedPort = service.port;
+      const hostNetwork = service.hostNetwork;
+      const image = service.image;
+      const serviceName = service.name;
+      const containerName =
+        slugify(service.containerName ?? serviceName ?? nameFromImage(image)) ||
+        'compose-app';
+      const projectDir = path.join(config.deploymentsPath, containerName);
+      const containerPort =
+        parsedInput.containerPort ??
+        selectedPublishedPort?.containerPort ??
+        inferComposeContainerPort(command, image, serviceName);
+      const requestedHostPort =
+        hostNetwork
+          ? parsedInput.hostPort ?? selectedPublishedPort?.hostPort ?? containerPort
+          : parsedInput.hostPort ?? selectedPublishedPort?.hostPort ?? null;
+
+      requirements.push(await portRequirement(requestedHostPort));
+
+      const uniqueMounts = Array.from(
+        new Map(composeHostMounts(command, projectDir).map((mount) => [mount.source, mount])).values()
+      );
+      const mountRequirements = await Promise.all(uniqueMounts.map(mountRequirement));
+      requirements.push(...mountRequirements);
+      requirements.push({
+        id: 'compose-project',
+        label: 'Compose project',
+        status: 'auto',
+        userHelpRequired: false,
+        detail: 'NaviProxy will create a managed Compose project directory and run docker compose up -d.',
+        commands: []
+      });
+      if (composeUsesHostNetwork(command)) {
+        requirements.push({
+          id: 'compose-host-network',
+          label: 'Host network',
+          status: 'needs_user',
+          userHelpRequired: true,
+          detail: 'This Compose file uses network_mode: host. NaviProxy will not inject ports; it will route to the inferred host port directly.',
+          commands: []
+        });
+      }
+      requirements.push(...composeSecurityRequirements(command));
+      return requirements;
+    }
+
+    if (parsedInput.method !== 'docker_run') {
+      requirements.push({
+        id: 'deploy-method',
+        label: 'Deploy method',
+        status: 'blocked',
+        userHelpRequired: true,
+        detail: `${parsedInput.method} deployment is not available yet.`,
+        commands: []
+      });
+      return requirements;
+    }
+
     const dockerRun = parseDockerRun(trimDockerPrefix(tokenizeShellCommand(command)));
     const selectedPublishedPort =
       dockerRun.ports.find((port) => port.protocol === 'tcp') ?? dockerRun.ports[0];
-    const requestedHostPort = parsedInput.hostPort ?? selectedPublishedPort?.hostPort ?? null;
+    const requestedHostPort =
+      dockerRun.hostNetwork
+        ? parsedInput.hostPort ??
+          selectedPublishedPort?.hostPort ??
+          parsedInput.containerPort ??
+          selectedPublishedPort?.containerPort ??
+          null
+        : parsedInput.hostPort ?? selectedPublishedPort?.hostPort ?? null;
 
     requirements.push(await portRequirement(requestedHostPort));
 
@@ -1192,7 +1381,34 @@ function optionInlineValue(token: string) {
   return token.includes('=') ? token.slice(token.indexOf('=') + 1) : null;
 }
 
+function expandShortOptionGroup(token: string) {
+  if (!/^-[A-Za-z]{2,}$/.test(token)) {
+    return [token];
+  }
+
+  const flags = token.slice(1).split('');
+  const firstValueFlag = flags.findIndex((flag) => shortOptionsWithValues.has(flag));
+
+  if (firstValueFlag === -1) {
+    return flags.map((flag) => `-${flag}`);
+  }
+
+  if (firstValueFlag === flags.length - 1) {
+    return [
+      ...flags.slice(0, firstValueFlag).map((flag) => `-${flag}`),
+      `-${flags[firstValueFlag]}`
+    ];
+  }
+
+  return [token];
+}
+
+function normalizeDockerRunTokens(tokens: string[]) {
+  return tokens.flatMap(expandShortOptionGroup);
+}
+
 function parseDockerRun(tokens: string[]) {
+  tokens = normalizeDockerRunTokens(tokens);
   let containerName: string | null = null;
   const ports: PublishedPort[] = [];
   const hostMounts: HostMount[] = [];
@@ -1246,6 +1462,18 @@ function parseDockerRun(tokens: string[]) {
         if (!inlineValue) {
           index += 1;
         }
+        continue;
+      }
+
+      if (token.startsWith('-p') && token.length > 2) {
+        const value = token.slice(2);
+        const parsed = parsePortSpec(value);
+
+        if (!parsed) {
+          throw new DeployInputError(`Unsupported Docker port mapping: ${value}`);
+        }
+
+        ports.push(parsed);
         continue;
       }
 
@@ -1360,6 +1588,18 @@ function parseDockerRun(tokens: string[]) {
         continue;
       }
 
+      if (token.startsWith('-v') && token.length > 2) {
+        const value = token.slice(2);
+        const hostMount = hostMountFromOption('-v', value);
+
+        if (hostMount) {
+          hostMounts.push(hostMount);
+        }
+
+        cleanedArgs.push('-v', value);
+        continue;
+      }
+
       cleanedArgs.push(token);
 
       if (inlineValue) {
@@ -1428,8 +1668,477 @@ function slugify(value: string) {
 }
 
 function nameFromImage(image: string) {
-  const withoutTag = image.split('@')[0].split(':')[0];
+  const withoutDigest = image.split('@')[0];
+  const lastSlash = withoutDigest.lastIndexOf('/');
+  const lastColon = withoutDigest.lastIndexOf(':');
+  const withoutTag =
+    lastColon > lastSlash
+      ? withoutDigest.slice(0, lastColon)
+      : withoutDigest;
+
   return withoutTag.split('/').at(-1) || 'self-hosted-app';
+}
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function parseComposeConfig(compose: string): ComposeConfig {
+  let parsed: unknown;
+
+  try {
+    parsed = parseYaml(compose);
+  } catch (error) {
+    throw new DeployInputError(`Compose YAML could not be parsed: ${commandDetail(error)}`);
+  }
+
+  if (!isRecord(parsed) || !isRecord(parsed.services)) {
+    throw new DeployInputError('Compose file must contain a services: map.');
+  }
+
+  const services = Object.entries(parsed.services)
+    .filter((entry): entry is [string, JsonRecord] => isRecord(entry[1]));
+
+  if (services.length === 0) {
+    throw new DeployInputError('Compose file must contain at least one service.');
+  }
+
+  return {
+    config: parsed,
+    services
+  };
+}
+
+function tryParseComposeConfig(compose: string) {
+  try {
+    return parseComposeConfig(compose);
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeComposeYaml(value: string) {
+  return /(^|\n)\s*services\s*:/i.test(value);
+}
+
+function composeServiceImage(service: JsonRecord) {
+  const image = service.image;
+
+  return typeof image === 'string' && image.trim() ? image.trim() : 'Docker Compose';
+}
+
+function composeServiceContainerName(service: JsonRecord) {
+  const containerName = service.container_name;
+
+  return typeof containerName === 'string' && containerName.trim()
+    ? containerName.trim()
+    : null;
+}
+
+function composeServiceUsesHostNetwork(service: JsonRecord) {
+  return service.network_mode === 'host' || service.network === 'host';
+}
+
+function composeUsesHostNetwork(compose: string) {
+  return selectComposeService(compose).hostNetwork;
+}
+
+function parsePortNumber(value: unknown) {
+  if (typeof value === 'number' && Number.isInteger(value)) {
+    return value >= 1 && value <= 65535 ? value : null;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const match = value.trim().match(/^(\d+)(?:\/tcp)?$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const port = Number(match[1]);
+
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+function composePortFromObject(value: JsonRecord): PublishedPort | null {
+  const containerPort = parsePortNumber(value.target);
+  const hostPort = parsePortNumber(value.published);
+  const protocol = typeof value.protocol === 'string' ? value.protocol : 'tcp';
+
+  if (!containerPort || protocol !== 'tcp') {
+    return null;
+  }
+
+  return {
+    hostPort,
+    containerPort,
+    protocol
+  };
+}
+
+function composePortFromValue(value: unknown): PublishedPort | null {
+  if (typeof value === 'string') {
+    return parsePortSpec(value);
+  }
+
+  if (typeof value === 'number') {
+    const containerPort = parsePortNumber(value);
+
+    return containerPort
+      ? {
+          hostPort: null,
+          containerPort,
+          protocol: 'tcp'
+        }
+      : null;
+  }
+
+  return isRecord(value) ? composePortFromObject(value) : null;
+}
+
+function firstComposePortForService(service: JsonRecord): PublishedPort | null {
+  const ports = service.ports;
+
+  if (!Array.isArray(ports)) {
+    return null;
+  }
+
+  for (const port of ports) {
+    const parsed = composePortFromValue(port);
+
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  return null;
+}
+
+function firstComposeExposePortForService(service: JsonRecord) {
+  const expose = service.expose;
+  const values = Array.isArray(expose) ? expose : [expose];
+
+  for (const value of values) {
+    const port = parsePortNumber(value);
+
+    if (port) {
+      return port;
+    }
+  }
+
+  return null;
+}
+
+function firstComposeExposePort(compose: string) {
+  return selectComposeService(compose).exposePort;
+}
+
+function isDatabaseLikeService(text: string) {
+  return /postgres|postgis|mysql|mariadb|redis|valkey|mongo|clickhouse|meili|qdrant|elastic|opensearch|rabbitmq|nats/i.test(text);
+}
+
+function isWebLikeService(text: string) {
+  return /web|app|api|server|frontend|backend|ui|admin|dashboard|http|nginx|caddy|apache|httpd|traefik|whoami|grafana|prometheus|upsnap|uptime-kuma|homeassistant|home-assistant|jellyfin|plex|portainer/i.test(text);
+}
+
+function isLikelyWebPort(port: number | null | undefined) {
+  return Boolean(
+    port &&
+      (port === 80 ||
+        port === 443 ||
+        port === 3000 ||
+        port === 3001 ||
+        port === 5000 ||
+        port === 5173 ||
+        (port >= 8000 && port <= 8999) ||
+        port === 9000)
+  );
+}
+
+function composeServiceScore(selection: ComposeServiceSelection, index: number) {
+  const text = `${selection.name} ${selection.image} ${selection.containerName ?? ''}`;
+  const databaseLike = isDatabaseLikeService(text);
+  const webLike = isWebLikeService(text);
+
+  return (
+    (databaseLike ? -100 : 0) +
+    (webLike ? 90 : 0) +
+    (isLikelyWebPort(selection.port?.containerPort) ? 70 : 0) +
+    (isLikelyWebPort(selection.exposePort) ? 50 : 0) +
+    (selection.port ? 30 : 0) +
+    (selection.exposePort ? 15 : 0) -
+    index
+  );
+}
+
+function selectComposeServiceFromConfig(parsed: ComposeConfig): ComposeServiceSelection {
+  const selections = parsed.services.map(([name, service]) => ({
+    name,
+    service,
+    image: composeServiceImage(service),
+    containerName: composeServiceContainerName(service),
+    port: firstComposePortForService(service),
+    exposePort: firstComposeExposePortForService(service),
+    hostNetwork: composeServiceUsesHostNetwork(service)
+  }));
+
+  const ranked = selections
+    .map((selection, index) => ({
+      selection,
+      score: composeServiceScore(selection, index)
+    }))
+    .sort((left, right) => right.score - left.score);
+
+  const selection = ranked[0]?.selection ?? selections[0];
+
+  if (!selection) {
+    throw new DeployInputError('Compose file must contain at least one service.');
+  }
+
+  return selection;
+}
+
+function selectComposeService(compose: string) {
+  return selectComposeServiceFromConfig(parseComposeConfig(compose));
+}
+
+function inferComposeContainerPort(compose: string, image: string, serviceName: string | null) {
+  const explicit = firstComposeExposePort(compose);
+
+  if (explicit) {
+    return explicit;
+  }
+
+  const text = `${image} ${serviceName ?? ''}`.toLowerCase();
+  const knownPorts: Array<[RegExp, number]> = [
+    [/postgres|postgis/, 5432],
+    [/mysql|mariadb/, 3306],
+    [/redis|valkey/, 6379],
+    [/mongo/, 27017],
+    [/clickhouse/, 8123],
+    [/grafana/, 3000],
+    [/prometheus/, 9090],
+    [/upsnap/, 8090],
+    [/uptime-kuma/, 3001],
+    [/homeassistant|home-assistant/, 8123],
+    [/jellyfin/, 8096],
+    [/plex/, 32400],
+    [/portainer/, 9000],
+    [/traefik|nginx|caddy|apache|httpd|whoami|web|app/, 80]
+  ];
+
+  return knownPorts.find(([pattern]) => pattern.test(text))?.[1] ?? 80;
+}
+
+function composeHostMounts(compose: string, baseDir?: string) {
+  const mounts: HostMount[] = [];
+  const config = tryParseComposeConfig(compose);
+
+  if (!config) {
+    return mounts;
+  }
+
+  for (const [, service] of config.services) {
+    const volumes = service.volumes;
+
+    if (!Array.isArray(volumes)) {
+      continue;
+    }
+
+    for (const volume of volumes) {
+      const mount =
+        typeof volume === 'string'
+          ? parseVolumeMount(volume)
+          : isRecord(volume) &&
+              (!volume.type || volume.type === 'bind') &&
+              typeof volume.source === 'string' &&
+              looksLikeHostPath(volume.source)
+            ? {
+                source: volume.source,
+                target: typeof volume.target === 'string' ? volume.target : null
+              }
+            : null;
+
+      if (mount) {
+        mounts.push({
+          ...mount,
+          baseDir
+        });
+      }
+    }
+  }
+
+  return mounts;
+}
+
+function composeStringList(value: unknown) {
+  if (typeof value === 'string' || typeof value === 'number') {
+    return [String(value)];
+  }
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (typeof item === 'string' || typeof item === 'number') {
+        return String(item);
+      }
+
+      if (isRecord(item)) {
+        const source = item.source ?? item.path ?? item.host_path;
+        const target = item.target ?? item.container_path;
+
+        return [source, target].filter((part) => typeof part === 'string').join(':');
+      }
+
+      return '';
+    })
+    .filter(Boolean);
+}
+
+function composeSecurityRequirements(compose: string): DeployPermissionRequirement[] {
+  const parsed = tryParseComposeConfig(compose);
+
+  if (!parsed) {
+    return [];
+  }
+
+  const privilegedServices: string[] = [];
+  const hostNamespaceServices: string[] = [];
+  const capabilities: string[] = [];
+  const devices: string[] = [];
+
+  for (const [name, service] of parsed.services) {
+    if (service.privileged === true) {
+      privilegedServices.push(name);
+    }
+
+    if (service.pid === 'host' || service.ipc === 'host') {
+      hostNamespaceServices.push(name);
+    }
+
+    for (const capability of composeStringList(service.cap_add)) {
+      capabilities.push(`${name}:${capability}`);
+    }
+
+    for (const device of composeStringList(service.devices)) {
+      devices.push(`${name}:${device}`);
+    }
+  }
+
+  return [
+    ...(privilegedServices.length
+      ? [
+          {
+            id: 'compose-privileged',
+            label: 'Privileged Compose service',
+            status: 'needs_user' as const,
+            userHelpRequired: true,
+            detail: `These services run privileged: ${privilegedServices.join(', ')}. Review the images before deploying.`,
+            commands: []
+          }
+        ]
+      : []),
+    ...(hostNamespaceServices.length
+      ? [
+          {
+            id: 'compose-host-namespace',
+            label: 'Host namespace',
+            status: 'needs_user' as const,
+            userHelpRequired: true,
+            detail: `These services share host PID or IPC namespaces: ${hostNamespaceServices.join(', ')}.`,
+            commands: []
+          }
+        ]
+      : []),
+    ...(capabilities.length
+      ? [
+          {
+            id: 'compose-capabilities',
+            label: 'Linux capabilities',
+            status: 'needs_user' as const,
+            userHelpRequired: true,
+            detail: `Compose adds capabilities: ${capabilities.join(', ')}`,
+            commands: []
+          }
+        ]
+      : []),
+    ...(devices.length
+      ? [
+          {
+            id: 'compose-devices',
+            label: 'Host devices',
+            status: 'needs_user' as const,
+            userHelpRequired: true,
+            detail: `Compose passes host devices: ${devices.join(', ')}`,
+            commands: devices.map((device) => inspectDeviceCommand(device.split(':').slice(1).join(':') || device))
+          }
+        ]
+      : [])
+  ];
+}
+
+function injectComposePort(compose: string, hostPort: number, containerPort: number) {
+  if (composeUsesHostNetwork(compose)) {
+    return compose;
+  }
+
+  const parsed = parseComposeConfig(compose);
+  const service = selectComposeServiceFromConfig(parsed).service;
+
+  if (!service) {
+    return compose;
+  }
+
+  const portMapping = `${hostPort}:${containerPort}`;
+
+  if (Array.isArray(service.ports)) {
+    const index = service.ports.findIndex((port) => Boolean(composePortFromValue(port)));
+
+    if (index >= 0) {
+      service.ports[index] = portMapping;
+    } else {
+      service.ports.unshift(portMapping);
+    }
+  } else {
+    service.ports = [portMapping];
+  }
+
+  return stringifyYaml(parsed.config);
+}
+
+async function writeComposeFile(projectName: string, compose: string) {
+  const projectDir = path.join(config.deploymentsPath, projectName);
+  const composeFilePath = path.join(projectDir, 'compose.yml');
+
+  await fs.mkdir(projectDir, { recursive: true });
+  await fs.writeFile(composeFilePath, compose, { mode: 0o600 });
+
+  return {
+    projectDir,
+    composeFilePath
+  };
+}
+
+async function removeComposeProjectContainers(projectName: string) {
+  const { stdout } = await runDockerCommand([
+    'ps',
+    '-aq',
+    '--filter',
+    `label=com.docker.compose.project=${projectName}`
+  ]);
+  const containerIds = stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+
+  if (containerIds.length === 0) {
+    return;
+  }
+
+  await runDockerCommand(['rm', '-fv', ...containerIds]);
 }
 
 function checkPortAvailable(port: number) {
@@ -1521,7 +2230,7 @@ export class DeployService {
         {
           id: 'docker_compose',
           name: 'Docker Compose',
-          status: 'planned',
+          status: 'available',
           capabilities: [
             'compose-yaml',
             'compose-file',
@@ -1616,6 +2325,8 @@ export class DeployService {
   async doctor(input?: unknown) {
     const checks: DeployDoctorCheck[] = [];
     const grantSteps: DeployDoctorGrantStep[] = [];
+    const parsedDoctorInput = deployDoctorInputSchema.safeParse(input ?? {});
+    const doctorMethod = parsedDoctorInput.success ? parsedDoctorInput.data.method : 'docker_run';
     const requirements = await commandPermissionRequirements(input);
     const groups = await currentGroupNames();
     const dockerBin = config.dockerBin;
@@ -1709,6 +2420,38 @@ export class DeployService {
       grantSteps.push(...dockerPermissionGrantSteps(detail));
     }
 
+    if (doctorMethod === 'docker_compose') {
+      const compose = await dockerComposeRuntimeStatus();
+
+      checks.push({
+        id: 'docker-compose',
+        label: 'Docker Compose',
+        status: compose.available ? 'pass' : 'fail',
+        detail: compose.detail
+      });
+
+      if (!compose.available) {
+        grantSteps.push({
+          title: 'Install Docker Compose',
+          description: 'Docker Compose is required for Compose deployments.',
+          commands: process.platform === 'darwin'
+            ? [
+                'brew install docker-compose',
+                'docker compose version'
+              ]
+            : process.platform === 'linux'
+              ? [
+                  'sudo apt-get update && sudo apt-get install docker-compose-plugin',
+                  'docker compose version'
+                ]
+              : [
+                  'winget install Docker.DockerDesktop',
+                  'docker compose version'
+                ]
+        });
+      }
+    }
+
     const commandBlocked = requirements.some((requirement) => requirement.status === 'blocked');
     const userHelpRequired =
       checks.some((check) => check.status === 'fail') ||
@@ -1744,14 +2487,26 @@ export class DeployService {
 
     try {
       await ensureHostMountsWritable(plan.hostMounts);
-      const { stdout } = await runDockerCommand(plan.dockerArgs, {
-        timeout: 240_000
-      });
-      containerId = stdout.trim();
+      if (plan.method === 'docker_compose') {
+        if (!plan.composeContent) {
+          throw new DeployExecutionError('Compose content was not prepared.');
+        }
+        await writeComposeFile(plan.containerName, plan.composeContent);
+      }
+      const { stdout } = plan.method === 'docker_compose'
+        ? await runDockerComposeCommand(plan.dockerArgs.slice(1), {
+            timeout: 240_000
+          })
+        : await runDockerCommand(plan.dockerArgs, {
+            timeout: 240_000
+          });
+      containerId = plan.method === 'docker_compose'
+        ? plan.composeProjectDir ?? plan.containerName
+        : stdout.trim();
     } catch (error) {
       const detail = commandDetail(error);
 
-      if (!isContainerNameConflict(detail)) {
+      if (plan.method !== 'docker_run' || !isContainerNameConflict(detail)) {
         throw error;
       }
 
@@ -1776,14 +2531,26 @@ export class DeployService {
       if (created.app) {
         this.repo.create({
           appId: created.app.id,
-          provider: 'docker',
+          provider: plan.method === 'docker_compose' ? 'docker_compose' : 'docker',
           resourceId: containerId,
           resourceName: plan.containerName
         });
       }
     } catch (error) {
       if (!adoptedExistingContainer) {
-        await runDockerCommand(['rm', '-fv', plan.containerName]).catch(() => undefined);
+        if (plan.method === 'docker_compose') {
+          await runDockerComposeCommand([
+            '-p',
+            plan.containerName,
+            '-f',
+            plan.composeFilePath ?? path.join(config.deploymentsPath, plan.containerName, 'compose.yml'),
+            'down',
+            '--volumes',
+            '--remove-orphans'
+          ]).catch(() => undefined);
+        } else {
+          await runDockerCommand(['rm', '-fv', plan.containerName]).catch(() => undefined);
+        }
       }
 
       if (created?.app) {
@@ -1813,11 +2580,28 @@ export class DeployService {
     }
 
     try {
-      await runDockerCommand(['rm', '-fv', deployment.resourceName]);
+      if (deployment.provider === 'docker_compose') {
+        try {
+          await runDockerComposeCommand([
+            '-p',
+            deployment.resourceName,
+            '-f',
+            path.join(deployment.resourceId, 'compose.yml'),
+            'down',
+            '--volumes',
+            '--remove-orphans'
+          ]);
+        } catch (composeError) {
+          await removeComposeProjectContainers(deployment.resourceName).catch(() => undefined);
+        }
+        await fs.rm(deployment.resourceId, { recursive: true, force: true }).catch(() => undefined);
+      } else {
+        await runDockerCommand(['rm', '-fv', deployment.resourceName]);
+      }
     } catch (error) {
       const detail = commandDetail(error);
 
-      if (!/No such container/i.test(detail)) {
+      if (!/No such container|no configuration file provided|not found/i.test(detail)) {
         throw error;
       }
     }
@@ -1832,6 +2616,15 @@ export class DeployService {
 
   private async buildPlan(input: unknown, allocateHostPort: boolean): Promise<DockerRunPlan> {
     const parsed = deployInputSchema.parse(input);
+
+    if (parsed.method === 'docker_compose') {
+      return this.buildComposePlan(parsed, allocateHostPort);
+    }
+
+    if (parsed.method !== 'docker_run') {
+      throw new DeployInputError(`${parsed.method} deployment is not available yet.`);
+    }
+
     const dockerRun = parseDockerRun(trimDockerPrefix(tokenizeShellCommand(parsed.command)));
     const selectedPublishedPort =
       dockerRun.ports.find((port) => port.protocol === 'tcp') ?? dockerRun.ports[0];
@@ -1844,10 +2637,14 @@ export class DeployService {
     }
 
     const requestedHostPort =
-      parsed.hostPort ?? selectedPublishedPort?.hostPort ?? null;
+      dockerRun.hostNetwork
+        ? parsed.hostPort ?? selectedPublishedPort?.hostPort ?? containerPort
+        : parsed.hostPort ?? selectedPublishedPort?.hostPort ?? null;
     const warnings = [...dockerRun.warnings];
     const hostPort =
-      allocateHostPort
+      dockerRun.hostNetwork
+        ? requestedHostPort
+        : allocateHostPort
         ? await resolveHostPort(requestedHostPort, warnings)
         : requestedHostPort;
     const baseName =
@@ -1875,17 +2672,26 @@ export class DeployService {
       tags: parsed.tags,
       favorite: parsed.favorite
     };
-    const dockerArgs = [
-      'run',
-      '-d',
-      '--name',
-      containerName,
-      '-p',
-      `${hostPort ?? requestedHostPort ?? containerPort}:${containerPort}`,
-      ...dockerRun.cleanedArgs
-    ];
+    const dockerArgs = dockerRun.hostNetwork
+      ? [
+          'run',
+          '-d',
+          '--name',
+          containerName,
+          ...dockerRun.cleanedArgs
+        ]
+      : [
+          'run',
+          '-d',
+          '--name',
+          containerName,
+          '-p',
+          `${hostPort ?? requestedHostPort ?? containerPort}:${containerPort}`,
+          ...dockerRun.cleanedArgs
+        ];
 
     return {
+      method: 'docker_run',
       containerName,
       image: dockerRun.image,
       publishMode: parsed.publishMode,
@@ -1903,6 +2709,120 @@ export class DeployService {
           : ['A free host port will be allocated when deployment starts.']),
         ...(dockerRun.hostMounts.length
           ? ['Bind mount paths will be created and checked before Docker starts.']
+          : []),
+        ...(dockerRun.hostNetwork
+          ? ['Host network mode detected; Docker publish flags will not be injected.']
+          : []),
+        ...(parsed.publishMode === 'public_domain_reverse_proxy'
+          ? [
+              'Public domain mode requires DNS to point to this machine and Caddy to receive public traffic.'
+            ]
+          : [
+              'Reverse proxy mode will bind the host in Caddy; DNS must resolve to this machine for clients to reach it.'
+            ])
+      ]
+    };
+  }
+
+  private async buildComposePlan(
+    parsed: z.infer<typeof deployInputSchema>,
+    allocateHostPort: boolean
+  ): Promise<DockerRunPlan> {
+    if (!looksLikeComposeYaml(parsed.command)) {
+      throw new DeployInputError('Paste docker-compose.yml or compose.yml content for Docker Compose deployment.');
+    }
+
+    const service = selectComposeService(parsed.command);
+    const selectedPublishedPort = service.port;
+    const hostNetwork = service.hostNetwork;
+    const image = service.image;
+    const serviceName = service.name;
+    const serviceContainerName = service.containerName;
+    const inferredContainerPort = inferComposeContainerPort(
+      parsed.command,
+      image,
+      serviceName
+    );
+    const containerPort =
+      parsed.containerPort ?? selectedPublishedPort?.containerPort ?? inferredContainerPort;
+    const requestedHostPort =
+      hostNetwork
+        ? parsed.hostPort ?? selectedPublishedPort?.hostPort ?? containerPort
+        : parsed.hostPort ?? selectedPublishedPort?.hostPort ?? null;
+    const warnings: string[] = [
+      ...(selectedPublishedPort || parsed.containerPort
+        ? []
+        : [`No Compose ports mapping was found, so NaviProxy inferred container port ${containerPort}.`])
+    ];
+    const hostPort =
+      hostNetwork
+        ? requestedHostPort
+        : allocateHostPort
+        ? await resolveHostPort(requestedHostPort, warnings)
+        : requestedHostPort;
+    const baseName =
+      parsed.name ??
+      serviceContainerName ??
+      serviceName ??
+      nameFromImage(image);
+    const containerName = slugify(baseName) || `compose-${containerPort}`;
+    const projectDir = path.join(config.deploymentsPath, containerName);
+    const composeContent = injectComposePort(
+      parsed.command,
+      hostPort ?? requestedHostPort ?? containerPort,
+      containerPort
+    );
+    const routeMode = parsed.routeMode;
+    const publicPath =
+      routeMode === 'subpath'
+        ? parsed.publicPath ?? `/${slugify(containerName) || 'app'}`
+        : null;
+    const targetUrl = `http://127.0.0.1:${hostPort ?? requestedHostPort ?? containerPort}`;
+    const composeFilePath = path.join(projectDir, 'compose.yml');
+    const appPayload = {
+      name: baseName,
+      iconType: 'builtin' as const,
+      iconValue: null,
+      targetUrl,
+      routeMode,
+      publicHost: parsed.publicHost,
+      publicPath,
+      enabled: parsed.enabled,
+      sortOrder: 0,
+      category: parsed.category ?? 'Self-hosted',
+      tags: parsed.tags,
+      favorite: parsed.favorite
+    };
+    const dockerArgs = [
+      'compose',
+      '-p',
+      containerName,
+      '-f',
+      composeFilePath,
+      'up',
+      '-d'
+    ];
+
+    return {
+      method: 'docker_compose',
+      containerName,
+      image,
+      publishMode: parsed.publishMode,
+      hostPort,
+      containerPort,
+      protocol: selectedPublishedPort?.protocol ?? 'tcp',
+      targetUrl,
+      hostMounts: composeHostMounts(composeContent, projectDir),
+      composeFilePath,
+      composeProjectDir: projectDir,
+      composeContent,
+      appPayload,
+      dockerArgs,
+      warnings: [
+        ...warnings,
+        'NaviProxy will write this Compose file into its managed deployments directory.',
+        ...(hostNetwork
+          ? ['Host network mode detected; ports will not be injected into the Compose file.']
           : []),
         ...(parsed.publishMode === 'public_domain_reverse_proxy'
           ? [

@@ -34,6 +34,33 @@ const migrations = [
           ON deployment_records(provider, resource_name);
       `);
     }
+  },
+  {
+    id: '20260513_deployment_records_compose_provider',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deployment_records_next (
+          app_id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL CHECK (provider IN ('docker', 'docker_compose')),
+          resource_id TEXT NOT NULL,
+          resource_name TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+        );
+
+        INSERT OR IGNORE INTO deployment_records_next (
+          app_id, provider, resource_id, resource_name, created_at
+        )
+        SELECT app_id, provider, resource_id, resource_name, created_at
+        FROM deployment_records;
+
+        DROP TABLE deployment_records;
+        ALTER TABLE deployment_records_next RENAME TO deployment_records;
+
+        CREATE INDEX IF NOT EXISTS idx_deployment_records_provider_resource
+          ON deployment_records(provider, resource_name);
+      `);
+    }
   }
 ];
 

@@ -33,6 +33,9 @@ export const config = {
   caddySyncEnabled: process.env.CADDY_SYNC_ENABLED === 'true',
   caddyListen: process.env.CADDY_LISTEN ?? ':80',
   dockerBin: process.env.DOCKER_BIN ?? 'docker',
+  deploymentsPath:
+    process.env.DEPLOYMENTS_PATH ??
+    path.resolve(process.cwd(), '../../data/deployments'),
   healthCheckIntervalSeconds: Number(process.env.HEALTH_CHECK_INTERVAL_SECONDS ?? 0),
   dashboardTargetUrl:
     process.env.NAVIPROXY_DASHBOARD_TARGET_URL ??

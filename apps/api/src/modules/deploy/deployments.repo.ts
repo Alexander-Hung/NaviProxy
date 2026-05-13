@@ -2,7 +2,7 @@ import type { NaviDatabase } from '../../db/database.js';
 
 export type DeploymentRecord = {
   appId: string;
-  provider: 'docker';
+  provider: 'docker' | 'docker_compose';
   resourceId: string;
   resourceName: string;
   createdAt: string;
@@ -10,7 +10,7 @@ export type DeploymentRecord = {
 
 type DeploymentRow = {
   app_id: string;
-  provider: 'docker';
+  provider: 'docker' | 'docker_compose';
   resource_id: string;
   resource_name: string;
   created_at: string;
@@ -39,7 +39,7 @@ export class DeploymentsRepo {
 
   create(input: {
     appId: string;
-    provider: 'docker';
+    provider: 'docker' | 'docker_compose';
     resourceId: string;
     resourceName: string;
   }) {

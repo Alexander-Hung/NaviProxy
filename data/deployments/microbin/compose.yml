@@ -1,0 +1,12 @@
+services:
+  microbin:
+    container_name: microbin
+    ports:
+      - "8090:8080"
+    volumes:
+      - ./data:/app/microbin-data
+    environment:
+      - TZ=America/Chicago
+    restart: unless-stopped
+    image: danielszabo99/microbin:latest
+networks: {}
