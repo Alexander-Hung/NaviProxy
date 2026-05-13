@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import { ZodError } from 'zod';
+import { z, ZodError } from 'zod';
 import type { AuditService } from '../audit/audit.service.js';
 import { AppConflictError } from '../apps/apps.service.js';
 import {
@@ -71,6 +71,73 @@ export async function registerDeployRoutes(
       });
 
       return reply.code(201).send(result);
+    } catch (error) {
+      return handleDeployError(error, reply);
+    }
+  });
+
+  app.get('/api/deployments/:appId', async (request, reply) => {
+    try {
+      const { appId } = request.params as { appId: string };
+      const deployment = await deployService.managedDeploymentStatus(appId);
+
+      if (!deployment) {
+        return reply.code(404).send({ message: 'Managed deployment not found' });
+      }
+
+      return deployment;
+    } catch (error) {
+      return handleDeployError(error, reply);
+    }
+  });
+
+  app.get('/api/deployments/:appId/logs', async (request, reply) => {
+    try {
+      const { appId } = request.params as { appId: string };
+      const { tail } = z.object({
+        tail: z.coerce.number().int().min(20).max(1000).default(200)
+      }).parse(request.query);
+      const logs = await deployService.deploymentLogs(appId, tail);
+
+      if (!logs) {
+        return reply.code(404).send({ message: 'Managed deployment not found' });
+      }
+
+      auditService.record({
+        action: 'deploy.logs',
+        targetType: 'app',
+        targetId: appId,
+        summary: `Viewed logs for ${logs.resourceName}`,
+        sourceIp: request.ip
+      });
+
+      return logs;
+    } catch (error) {
+      return handleDeployError(error, reply);
+    }
+  });
+
+  app.post('/api/deployments/:appId/action', async (request, reply) => {
+    try {
+      const { appId } = request.params as { appId: string };
+      const { action } = z.object({
+        action: z.enum(['start', 'stop', 'restart'])
+      }).parse(request.body);
+      const deployment = await deployService.manageDeployment(appId, action);
+
+      if (!deployment) {
+        return reply.code(404).send({ message: 'Managed deployment not found' });
+      }
+
+      auditService.record({
+        action: `deploy.${action}`,
+        targetType: 'app',
+        targetId: appId,
+        summary: `${action} ${deployment.resourceName}`,
+        sourceIp: request.ip
+      });
+
+      return deployment;
     } catch (error) {
       return handleDeployError(error, reply);
     }

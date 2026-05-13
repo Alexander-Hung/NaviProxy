@@ -87,6 +87,7 @@ type DockerInspectContainer = {
   Name: string;
   State?: {
     Running?: boolean;
+    Status?: string;
   };
   NetworkSettings?: {
     Ports?: Record<string, DockerInspectPort>;
@@ -2141,6 +2142,45 @@ async function removeComposeProjectContainers(projectName: string) {
   await runDockerCommand(['rm', '-fv', ...containerIds]);
 }
 
+async function listComposeProjectContainers(projectName: string) {
+  const { stdout } = await runDockerCommand([
+    'ps',
+    '-a',
+    '--filter',
+    `label=com.docker.compose.project=${projectName}`,
+    '--format',
+    '{{json .}}'
+  ]);
+
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        const parsed = JSON.parse(line) as {
+          ID?: string;
+          Names?: string;
+          State?: string;
+          Status?: string;
+          Image?: string;
+          Ports?: string;
+        };
+
+        return [{
+          id: parsed.ID ?? '',
+          name: parsed.Names ?? '',
+          state: parsed.State ?? 'unknown',
+          status: parsed.Status ?? 'unknown',
+          image: parsed.Image ?? '',
+          ports: parsed.Ports ?? ''
+        }];
+      } catch {
+        return [];
+      }
+    });
+}
+
 function checkPortAvailable(port: number) {
   return new Promise<boolean>((resolve) => {
     const server = net.createServer();
@@ -2570,6 +2610,121 @@ export class DeployService {
 
   findManagedDeployment(appId: string) {
     return this.repo.findByAppId(appId);
+  }
+
+  async managedDeploymentStatus(appId: string) {
+    const deployment = this.repo.findByAppId(appId);
+
+    if (!deployment) {
+      return null;
+    }
+
+    if (deployment.provider === 'docker_compose') {
+      const containers = await listComposeProjectContainers(deployment.resourceName);
+      const composeFilePath = path.join(deployment.resourceId, 'compose.yml');
+
+      return {
+        ...deployment,
+        runtime: {
+          kind: 'docker_compose' as const,
+          running: containers.length > 0 && containers.some((container) => container.state === 'running'),
+          state: containers.length > 0
+            ? `${containers.filter((container) => container.state === 'running').length}/${containers.length} running`
+            : 'missing',
+          composeFilePath,
+          containers
+        }
+      };
+    }
+
+    try {
+      const container = await inspectContainer(deployment.resourceName);
+
+      return {
+        ...deployment,
+        runtime: {
+          kind: 'docker' as const,
+          running: Boolean(container.State?.Running),
+          state: container.State?.Status ?? (container.State?.Running ? 'running' : 'stopped'),
+          containerId: container.Id,
+          containerName: container.Name.replace(/^\//, '')
+        }
+      };
+    } catch (error) {
+      const detail = commandDetail(error);
+
+      if (!/No such object|No such container|not found/i.test(detail)) {
+        throw error;
+      }
+
+      return {
+        ...deployment,
+        runtime: {
+          kind: 'docker' as const,
+          running: false,
+          state: 'missing',
+          containerId: deployment.resourceId,
+          containerName: deployment.resourceName
+        }
+      };
+    }
+  }
+
+  async manageDeployment(appId: string, action: 'start' | 'stop' | 'restart') {
+    const deployment = this.repo.findByAppId(appId);
+
+    if (!deployment) {
+      return null;
+    }
+
+    if (deployment.provider === 'docker_compose') {
+      await runDockerComposeCommand([
+        '-p',
+        deployment.resourceName,
+        '-f',
+        path.join(deployment.resourceId, 'compose.yml'),
+        action
+      ]);
+    } else {
+      await runDockerCommand([action, deployment.resourceName]);
+    }
+
+    return this.managedDeploymentStatus(appId);
+  }
+
+  async deploymentLogs(appId: string, tail = 200) {
+    const deployment = this.repo.findByAppId(appId);
+
+    if (!deployment) {
+      return null;
+    }
+
+    const safeTail = Math.max(20, Math.min(1000, tail));
+    const result = deployment.provider === 'docker_compose'
+      ? await runDockerComposeCommand([
+          '-p',
+          deployment.resourceName,
+          '-f',
+          path.join(deployment.resourceId, 'compose.yml'),
+          'logs',
+          '--tail',
+          String(safeTail),
+          '--no-color'
+        ])
+      : await runDockerCommand([
+          'logs',
+          '--tail',
+          String(safeTail),
+          deployment.resourceName
+        ]);
+
+    return {
+      appId,
+      provider: deployment.provider,
+      resourceName: deployment.resourceName,
+      tail: safeTail,
+      logs: [result.stdout, result.stderr].filter(Boolean).join('\n').trimEnd()
+    };
   }
 
   async deleteManagedDeployment(appId: string) {

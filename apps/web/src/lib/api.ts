@@ -159,6 +159,44 @@ export type DeployResult = {
   proxySync: ProxySync;
 };
 
+export type DeploymentStatus = {
+  appId: string;
+  provider: 'docker' | 'docker_compose';
+  resourceId: string;
+  resourceName: string;
+  createdAt: string;
+  runtime:
+    | {
+        kind: 'docker';
+        running: boolean;
+        state: string;
+        containerId: string;
+        containerName: string;
+      }
+    | {
+        kind: 'docker_compose';
+        running: boolean;
+        state: string;
+        composeFilePath: string;
+        containers: Array<{
+          id: string;
+          name: string;
+          state: string;
+          status: string;
+          image: string;
+          ports: string;
+        }>;
+      };
+};
+
+export type DeploymentLogs = {
+  appId: string;
+  provider: 'docker' | 'docker_compose';
+  resourceName: string;
+  tail: number;
+  logs: string;
+};
+
 export type DeployDoctor = {
   ok: boolean;
   dockerBin: string;
@@ -404,6 +442,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload)
     }),
+  deploymentStatus: (appId: string) =>
+    request<DeploymentStatus>(`/api/deployments/${appId}`),
+  manageDeployment: (appId: string, action: 'start' | 'stop' | 'restart') =>
+    request<DeploymentStatus>(`/api/deployments/${appId}/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    }),
+  deploymentLogs: (appId: string, tail = 200) =>
+    request<DeploymentLogs>(`/api/deployments/${appId}/logs?tail=${tail}`),
   syncProxy: () =>
     request<ProxySync>('/api/proxy/sync', {
       method: 'POST'

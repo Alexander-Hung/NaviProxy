@@ -12,6 +12,7 @@ import {
   Search,
   Server,
   Shield,
+  Square,
   Terminal,
   Upload,
   X
@@ -32,6 +33,8 @@ import {
   type DeployPayload,
   type DeployPlan,
   type DeployResult,
+  type DeploymentLogs,
+  type DeploymentStatus,
   type DnsDiagnostic,
   type LocalService,
   type ContainerSettings,
@@ -815,6 +818,10 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   const [showDeployDialog, setShowDeployDialog] = useState(false);
   const [detailAppId, setDetailAppId] = useState<string | null>(null);
   const [detailHistory, setDetailHistory] = useState<AppStatus[]>([]);
+  const [deploymentStatus, setDeploymentStatus] = useState<DeploymentStatus | null>(null);
+  const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLogs | null>(null);
+  const [deploymentAction, setDeploymentAction] = useState<'start' | 'stop' | 'restart' | null>(null);
+  const [loadingDeploymentLogs, setLoadingDeploymentLogs] = useState(false);
   const [appSearch, setAppSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [favoriteOnly, setFavoriteOnly] = useState(false);
@@ -1234,10 +1241,57 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   function openDetails(app: ContainerApp) {
     setDetailAppId(app.id);
     setDetailHistory([]);
+    setDeploymentStatus(null);
+    setDeploymentLogs(null);
     void api
       .appHealthHistory(app.id)
       .then(setDetailHistory)
       .catch(() => setDetailHistory([]));
+    if (app.managedDeployment) {
+      void api
+        .deploymentStatus(app.id)
+        .then(setDeploymentStatus)
+        .catch(() => setDeploymentStatus(null));
+    }
+  }
+
+  async function runDeploymentAction(action: 'start' | 'stop' | 'restart') {
+    if (!detailApp) {
+      return;
+    }
+
+    setDeploymentAction(action);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const status = await api.manageDeployment(detailApp.id, action);
+      setDeploymentStatus(status);
+      setMessage(`${action[0].toUpperCase()}${action.slice(1)} command completed for ${status.resourceName}.`);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setDeploymentAction(null);
+    }
+  }
+
+  async function viewDeploymentLogs() {
+    if (!detailApp) {
+      return;
+    }
+
+    setLoadingDeploymentLogs(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      setDeploymentLogs(await api.deploymentLogs(detailApp.id, 300));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoadingDeploymentLogs(false);
+    }
   }
 
   async function submit(event: FormEvent) {
@@ -2055,6 +2109,102 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                 </div>
               </div>
             </div>
+            {detailApp.managedDeployment ? (
+              <div className="mt-4 rounded border border-black/10 p-3 text-sm dark:border-white/15">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="label">Self-host deployment</div>
+                    {deploymentStatus ? (
+                      <div className="mt-1 space-y-1">
+                        <div className="font-medium">
+                          {deploymentStatus.resourceName}
+                          <span
+                            className={`ml-2 rounded px-2 py-0.5 text-xs ${
+                              deploymentStatus.runtime.running
+                                ? 'bg-spruce/10 text-spruce dark:bg-[#8fe0ce]/10 dark:text-[#9be8d7]'
+                                : 'bg-coral/10 text-coral dark:bg-[#ff9b8c]/10 dark:text-[#ffb1a5]'
+                            }`}
+                          >
+                            {deploymentStatus.runtime.state}
+                          </span>
+                        </div>
+                        <div className="text-xs text-black/55 dark:text-[#b8c7c1]">
+                          {deploymentStatus.provider === 'docker_compose'
+                            ? `Docker Compose · ${deploymentStatus.runtime.kind === 'docker_compose' ? deploymentStatus.runtime.composeFilePath : ''}`
+                            : `Docker container · ${deploymentStatus.runtime.kind === 'docker' ? deploymentStatus.runtime.containerId.slice(0, 12) : ''}`}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-1 text-black/55 dark:text-[#b8c7c1]">
+                        Loading deployment status...
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      className="btn-secondary h-9"
+                      onClick={() => void viewDeploymentLogs()}
+                      disabled={loadingDeploymentLogs}
+                      title="View deployment logs"
+                    >
+                      <Terminal size={15} />
+                      {loadingDeploymentLogs ? 'Loading' : 'Logs'}
+                    </button>
+                    <button
+                      className="btn-secondary h-9"
+                      onClick={() => void runDeploymentAction('start')}
+                      disabled={Boolean(deploymentAction)}
+                      title="Start deployment"
+                    >
+                      <Rocket size={15} />
+                      {deploymentAction === 'start' ? 'Starting' : 'Start'}
+                    </button>
+                    <button
+                      className="btn-secondary h-9"
+                      onClick={() => void runDeploymentAction('restart')}
+                      disabled={Boolean(deploymentAction)}
+                      title="Restart deployment"
+                    >
+                      <RefreshCw
+                        size={15}
+                        className={deploymentAction === 'restart' ? 'animate-spin' : ''}
+                      />
+                      {deploymentAction === 'restart' ? 'Restarting' : 'Restart'}
+                    </button>
+                    <button
+                      className="btn-secondary h-9"
+                      onClick={() => void runDeploymentAction('stop')}
+                      disabled={Boolean(deploymentAction)}
+                      title="Stop deployment"
+                    >
+                      <Square size={14} />
+                      {deploymentAction === 'stop' ? 'Stopping' : 'Stop'}
+                    </button>
+                  </div>
+                </div>
+                {deploymentStatus?.runtime.kind === 'docker_compose' &&
+                deploymentStatus.runtime.containers.length > 0 ? (
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    {deploymentStatus.runtime.containers.map((container) => (
+                      <div
+                        key={container.id || container.name}
+                        className="rounded border border-black/10 p-2 text-xs dark:border-white/15"
+                      >
+                        <div className="font-semibold">{container.name || container.id}</div>
+                        <div className="mt-1 text-black/55 dark:text-[#b8c7c1]">
+                          {container.image} · {container.status}
+                        </div>
+                        {container.ports ? (
+                          <div className="mt-1 break-all text-black/45 dark:text-[#9fb0aa]">
+                            {container.ports}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {detailHistory.length > 0 ? (
               <div className="mt-4 grid gap-2 md:grid-cols-2">
                 {detailHistory.slice(0, 6).map((item) => (
@@ -2550,6 +2700,50 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   Open app
                 </button>
               </div>
+            </section>
+          </div>
+        ) : null}
+
+        {deploymentLogs ? (
+          <div
+            className="fixed inset-0 z-50 grid place-items-center bg-black/45 p-4 backdrop-blur-sm"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                setDeploymentLogs(null);
+              }
+            }}
+          >
+            <section
+              className="panel flex max-h-[min(760px,calc(100vh-2rem))] w-full max-w-5xl flex-col p-4 shadow-xl"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="deploymentLogsTitle"
+            >
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase text-black/45 dark:text-[#a9bbb4]">
+                    Deployment logs
+                  </p>
+                  <h3 id="deploymentLogsTitle" className="mt-1 text-lg font-semibold">
+                    {deploymentLogs.resourceName}
+                  </h3>
+                  <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
+                    Last {deploymentLogs.tail} lines · {deploymentLogs.provider === 'docker_compose' ? 'Docker Compose' : 'Docker'}
+                  </p>
+                </div>
+                <button
+                  className="grid h-9 w-9 place-items-center rounded text-black/45 transition hover:bg-black/5 hover:text-black dark:text-[#a9bbb4] dark:hover:bg-white/10 dark:hover:text-white"
+                  onClick={() => setDeploymentLogs(null)}
+                  title="Close logs"
+                  aria-label="Close logs"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+              <pre className="min-h-[280px] overflow-auto rounded bg-[#101715] p-3 text-xs leading-relaxed text-[#d9eee7]">
+                {deploymentLogs.logs || 'No logs returned.'}
+              </pre>
             </section>
           </div>
         ) : null}
