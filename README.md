@@ -184,6 +184,8 @@ Security reports should follow [SECURITY.md](SECURITY.md).
 
 Release preparation is documented in [RELEASE.md](RELEASE.md), and user-facing changes are tracked in [CHANGELOG.md](CHANGELOG.md).
 
+Branching and version control conventions are documented in [docs/version-control.md](docs/version-control.md).
+
 ## License
 
 The Containers is released under the [MIT License](LICENSE).

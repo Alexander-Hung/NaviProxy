@@ -40,6 +40,8 @@ npm run test:e2e
 ## Contribution Guidelines
 
 - Keep changes focused and reviewable.
+- Use feature branches from `develop` for normal development.
+- Open release hardening work from `release/*` branches.
 - Follow existing project patterns before adding new abstractions.
 - Prefer small, explicit behavior over broad rewrites.
 - Add tests when changing deploy parsing, Docker/Compose behavior, Caddy rendering, app lifecycle, auth, or database contracts.
