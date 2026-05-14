@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 
 CREATE TABLE IF NOT EXISTS deployment_records (
   app_id TEXT PRIMARY KEY,
-  provider TEXT NOT NULL CHECK (provider IN ('docker', 'docker_compose')),
+  provider TEXT NOT NULL CHECK (provider IN ('docker', 'docker_compose', 'binary_service')),
   resource_id TEXT NOT NULL,
   resource_name TEXT NOT NULL,
   deploy_input TEXT,
