@@ -180,14 +180,12 @@ It will not silently:
 
 Host permission checks are shown before deploy so users can see what is ready, what The Containers can handle, and what needs manual host authorization.
 
-## Testing
+## Validation
 
 ```bash
-npm test
 npm run lint
 npm run typecheck
 npm run build
-npm run test:e2e
 ```
 
 ## Contributing
