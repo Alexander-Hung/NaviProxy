@@ -1975,14 +1975,8 @@ function selectComposeService(compose: string) {
   return selectComposeServiceFromConfig(parseComposeConfig(compose));
 }
 
-function inferComposeContainerPort(compose: string, image: string, serviceName: string | null) {
-  const explicit = firstComposeExposePort(compose);
-
-  if (explicit) {
-    return explicit;
-  }
-
-  const text = `${image} ${serviceName ?? ''}`.toLowerCase();
+function inferKnownContainerPort(image: string, name: string | null) {
+  const text = `${image} ${name ?? ''}`.toLowerCase();
   const knownPorts: Array<[RegExp, number]> = [
     [/postgres|postgis/, 5432],
     [/mysql|mariadb/, 3306],
@@ -2001,6 +1995,16 @@ function inferComposeContainerPort(compose: string, image: string, serviceName: 
   ];
 
   return knownPorts.find(([pattern]) => pattern.test(text))?.[1] ?? 80;
+}
+
+function inferComposeContainerPort(compose: string, image: string, serviceName: string | null) {
+  const explicit = firstComposeExposePort(compose);
+
+  if (explicit) {
+    return explicit;
+  }
+
+  return inferKnownContainerPort(image, serviceName);
 }
 
 function composeHostMounts(compose: string, baseDir?: string) {
@@ -3300,7 +3304,11 @@ export class DeployService {
     const dockerRun = parseDockerRun(trimDockerPrefix(tokenizeShellCommand(parsed.command)));
     const selectedPublishedPort =
       dockerRun.ports.find((port) => port.protocol === 'tcp') ?? dockerRun.ports[0];
-    const containerPort = parsed.containerPort ?? selectedPublishedPort?.containerPort;
+    const inferredContainerPort = inferKnownContainerPort(
+      dockerRun.image,
+      parsed.name ?? dockerRun.containerName
+    );
+    const containerPort = parsed.containerPort ?? selectedPublishedPort?.containerPort ?? inferredContainerPort;
 
     if (!containerPort) {
       throw new DeployInputError(
@@ -3312,7 +3320,12 @@ export class DeployService {
       dockerRun.hostNetwork
         ? parsed.hostPort ?? selectedPublishedPort?.hostPort ?? containerPort
         : parsed.hostPort ?? selectedPublishedPort?.hostPort ?? null;
-    const warnings = [...dockerRun.warnings];
+    const warnings = [
+      ...dockerRun.warnings,
+      ...(selectedPublishedPort || parsed.containerPort
+        ? []
+        : [`No Docker publish mapping was found, so The Containers inferred container port ${containerPort}.`])
+    ];
     const hostPort =
       dockerRun.hostNetwork
         ? requestedHostPort

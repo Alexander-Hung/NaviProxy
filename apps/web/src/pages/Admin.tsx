@@ -911,7 +911,6 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     if (
       !showDeployDialog ||
       !deployForm.command.trim() ||
-      !deployForm.containerPort ||
       deployForm.hostPort
     ) {
       return;
@@ -926,7 +925,8 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
           if (plan.hostPort) {
             setDeployForm((current) => ({
               ...current,
-              hostPort: plan.hostPort
+              hostPort: plan.hostPort,
+              containerPort: current.containerPort ?? plan.containerPort
             }));
           }
         })
