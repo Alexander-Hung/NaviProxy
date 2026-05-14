@@ -8,6 +8,7 @@ data/*.sqlite
 data/*.sqlite-*
 apps/web/.vite/
 coverage/
+test-results/
 
 # Private local docs and planning notes. Public project docs must stay in English.
 docs/*.md
