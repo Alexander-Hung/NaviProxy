@@ -10,11 +10,15 @@ The Admin backup export contains:
 - Settings.
 - Managed deployment records.
 - Saved redeploy metadata for deployments created by The Containers.
+- Managed deployment files, including Compose project files under `DEPLOYMENTS_PATH`.
+- Readable Docker bind mount and named volume data discovered from managed Docker containers.
 
 It does not contain:
 
 - Docker named volume data.
 - Bind-mounted app data directories.
+- Unreadable Docker Desktop VM volume paths.
+- Skipped large files beyond backup limits.
 - External databases.
 - Router port forwarding rules.
 - Public DNS records.
@@ -94,4 +98,3 @@ Keep the old host powered off but unchanged until the new host is verified. If t
 2. Restore DNS or router forwarding to the old host.
 3. Start the old host services.
 4. Review The Containers audit logs to see what changed during migration.
-

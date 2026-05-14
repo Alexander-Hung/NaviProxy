@@ -21,6 +21,7 @@ This project follows [Semantic Versioning](https://semver.org/) while it is publ
 - Deployment drift checks for missing containers, stopped containers, missing Compose files, port mismatches, and missing redeploy metadata.
 - Deployment drift repair actions for starting stopped deployments, redeploying missing managed resources, and updating app targets from runtime ports.
 - Backup and restore support for managed deployment records and redeploy metadata.
+- Backup bundle support for managed deployment files, readable Docker bind mount and named volume data, plus compatibility handling for older or differently shaped app export files.
 - Migration checklist for moving The Containers to a new host.
 
 ### Changed
