@@ -207,7 +207,8 @@ install_node_app() {
   primary_group="$(user_primary_group)"
 
   log "Installing Node dependencies and building the app as $SERVICE_USER..."
-  run_root chown "$SERVICE_USER":"$primary_group" "$ROOT_DIR" "$ROOT_DIR/package.json" "$ROOT_DIR/package-lock.json" 2>/dev/null || true
+  log "Repairing project ownership so npm can create workspace node_modules..."
+  run_root chown -R "$SERVICE_USER":"$primary_group" "$ROOT_DIR"
   while IFS= read -r -d '' path; do
     run_root chown -R "$SERVICE_USER":"$primary_group" "$path"
   done < <(find "$ROOT_DIR" -path "$ROOT_DIR/.git" -prune -o \( \( -name node_modules -o -name dist \) -type d -print0 -prune \))
