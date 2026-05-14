@@ -67,6 +67,34 @@ const migrations = [
     up(db: Database.Database) {
       ensureColumn(db, 'deployment_records', 'deploy_input', 'TEXT');
     }
+  },
+  {
+    id: '20260514_deployment_records_binary_service_provider',
+    up(db: Database.Database) {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deployment_records_next (
+          app_id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL CHECK (provider IN ('docker', 'docker_compose', 'binary_service')),
+          resource_id TEXT NOT NULL,
+          resource_name TEXT NOT NULL,
+          deploy_input TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (app_id) REFERENCES apps(id) ON DELETE CASCADE
+        );
+
+        INSERT OR IGNORE INTO deployment_records_next (
+          app_id, provider, resource_id, resource_name, deploy_input, created_at
+        )
+        SELECT app_id, provider, resource_id, resource_name, deploy_input, created_at
+        FROM deployment_records;
+
+        DROP TABLE deployment_records;
+        ALTER TABLE deployment_records_next RENAME TO deployment_records;
+
+        CREATE INDEX IF NOT EXISTS idx_deployment_records_provider_resource
+          ON deployment_records(provider, resource_name);
+      `);
+    }
   }
 ];
 

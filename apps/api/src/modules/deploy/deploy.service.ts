@@ -49,7 +49,7 @@ type PublishedPort = {
 };
 
 type DockerRunPlan = {
-  method: 'docker_run' | 'docker_compose';
+  method: 'docker_run' | 'docker_compose' | 'binary_service';
   containerName: string;
   image: string;
   publishMode: 'reverse_proxy' | 'public_domain_reverse_proxy';
@@ -76,8 +76,14 @@ type DockerRunPlan = {
     favorite: boolean;
   };
   dockerArgs: string[];
+  processCommand?: string;
+  processArgs?: string[];
+  serviceArgs?: string[];
+  serviceName?: string;
+  serviceFilePath?: string;
+  serviceKind?: 'systemd_user' | 'launchd_user' | 'process';
   warnings: string[];
-  resolvedDeployInput: ParsedDeployInput;
+  resolvedDeployInput: ParsedDeployInput & Record<string, unknown>;
 };
 
 type DockerInspectPort = Array<{
@@ -171,6 +177,7 @@ const deployDoctorInputSchema = z.object({
     'custom_command'
   ]).default('docker_run'),
   command: z.string().trim().max(8000).optional(),
+  name: z.string().trim().max(80).optional(),
   publishMode: z.enum(['reverse_proxy', 'public_domain_reverse_proxy']).default('reverse_proxy'),
   publicHost: z.string().trim().max(253).optional(),
   hostPort: z.number().int().min(1).max(65535).nullable().optional(),
@@ -267,7 +274,7 @@ function isDockerDaemonUnavailable(message: string) {
 }
 
 function resolvedDeployInput(parsed: ParsedDeployInput, plan: {
-  method: 'docker_run' | 'docker_compose';
+  method: 'docker_run' | 'docker_compose' | 'binary_service';
   hostPort: number | null;
   containerPort: number;
   appPayload: DockerRunPlan['appPayload'];
@@ -363,6 +370,18 @@ async function commandOutput(command: string, args: string[], timeout = 10_000) 
   });
 
   return stdout.trim();
+}
+
+async function resolveCommandPath(command: string) {
+  if (command.includes('/') || command.includes('\\')) {
+    return command;
+  }
+
+  try {
+    return await commandOutput(process.platform === 'win32' ? 'where' : 'which', [command]);
+  } catch {
+    return command;
+  }
 }
 
 async function currentGroupNames() {
@@ -1180,6 +1199,50 @@ async function portRequirement(port: number | null): Promise<DeployPermissionReq
   };
 }
 
+async function binaryServicePortRequirement(port: number | null): Promise<DeployPermissionRequirement> {
+  if (!port) {
+    return {
+      id: 'service-port',
+      label: 'Service port',
+      status: 'blocked',
+      userHelpRequired: true,
+      detail: 'Enter the local port where this service exposes its web UI before deploying.',
+      commands: []
+    };
+  }
+
+  if (needsPrivilegedPortRemap(port)) {
+    return {
+      id: `service-port-privileged-${port}`,
+      label: `Service port ${port}`,
+      status: 'blocked',
+      userHelpRequired: true,
+      detail: `Port ${port} requires elevated privileges. Configure the service to listen on an unprivileged local port and route through the reverse proxy.`,
+      commands: []
+    };
+  }
+
+  if (!(await checkPortAvailable(port))) {
+    return {
+      id: `service-port-used-${port}`,
+      label: `Service port ${port}`,
+      status: 'blocked',
+      userHelpRequired: true,
+      detail: `Port ${port} is already in use. Binary/service cannot auto-remap it because the service command controls which port it listens on.`,
+      commands: []
+    };
+  }
+
+  return {
+    id: `service-port-ready-${port}`,
+    label: `Service port ${port}`,
+    status: 'ready',
+    userHelpRequired: false,
+    detail: `Port ${port} is available.`,
+    commands: []
+  };
+}
+
 function localAddresses() {
   return Object.values(os.networkInterfaces())
     .flatMap((entries) => entries ?? [])
@@ -1340,6 +1403,55 @@ async function commandPermissionRequirements(input: unknown) {
         });
       }
       requirements.push(...composeSecurityRequirements(command));
+      return requirements;
+    }
+
+    if (parsedInput.method === 'binary_service') {
+      const parsedCommand = parseBinaryServiceCommand(command);
+      const webPort = parsedInput.hostPort ?? parsedInput.containerPort ?? null;
+
+      if (!webPort) {
+        requirements.push({
+          id: 'service-port',
+          label: 'Service port',
+          status: 'blocked',
+          userHelpRequired: true,
+          detail: 'Enter the local port where this service exposes its web UI before deploying.',
+          commands: []
+        });
+        return requirements;
+      }
+
+      const serviceKind = binaryServiceKind();
+      const executableName = path.basename(parsedCommand.executable).replace(/\.[^.]+$/, '');
+      const baseName = parsedInput.name ?? executableName;
+      const serviceName = binaryServiceName(slugify(baseName) || slugify(executableName) || 'binary-service');
+
+      requirements.push(await binaryServicePortRequirement(webPort));
+      requirements.push({
+        id: 'binary-service-command',
+        label: 'Service command',
+        status: 'auto',
+        userHelpRequired: false,
+        detail: `The Containers will install ${parsedCommand.executable} ${parsedCommand.args.join(' ')} as a binary service and route to port ${webPort}.`,
+        commands: []
+      });
+      requirements.push({
+        id: 'service-manager',
+        label: 'Service manager',
+        status: serviceKind === 'process' ? 'needs_user' : 'auto',
+        userHelpRequired: serviceKind === 'process',
+        detail: serviceKind === 'systemd_user'
+          ? `The Containers will install and enable user systemd service ${serviceName}.service.`
+          : serviceKind === 'launchd_user'
+            ? `The Containers will install and bootstrap launchd agent ${serviceName}.`
+            : 'This platform is not supported for service installation; The Containers can only start the process directly.',
+        commands: serviceKind === 'systemd_user'
+          ? ['systemctl --user status', `systemctl --user status ${serviceName}.service`]
+          : serviceKind === 'launchd_user'
+            ? ['launchctl print gui/$(id -u)']
+            : []
+      });
       return requirements;
     }
 
@@ -2315,6 +2427,514 @@ async function resolveHostPort(requestedHostPort: number | null, warnings: strin
   return allocated;
 }
 
+function parseBinaryServiceCommand(command: string) {
+  const tokens = tokenizeShellCommand(command);
+  const sudoIndex = tokens[0] === 'sudo' ? 1 : 0;
+  const executable = tokens[sudoIndex];
+
+  if (!executable) {
+    throw new DeployInputError('Enter the command that starts this service.');
+  }
+
+  const args = tokens.slice(sudoIndex + 1);
+
+  return {
+    executable,
+    args,
+    serviceArgs: args
+  };
+}
+
+function binaryServiceName(resourceName = 'binary-service') {
+  return `the-containers-${slugify(resourceName) || 'binary-service'}`;
+}
+
+function systemdUserServicePath(serviceName: string) {
+  return path.join(os.homedir(), '.config', 'systemd', 'user', `${serviceName}.service`);
+}
+
+function launchdPlistPath(serviceName: string) {
+  return path.join(os.homedir(), 'Library', 'LaunchAgents', `${serviceName}.plist`);
+}
+
+function binaryServiceKind(): DockerRunPlan['serviceKind'] {
+  if (process.platform === 'linux') {
+    return 'systemd_user';
+  }
+
+  if (process.platform === 'darwin') {
+    return 'launchd_user';
+  }
+
+  return 'process';
+}
+
+function binaryProcessName(resourceName: string, deployInput?: unknown) {
+  if (deployInput && typeof deployInput === 'object' && 'processCommand' in deployInput) {
+    const processCommand = (deployInput as { processCommand?: unknown }).processCommand;
+
+    if (typeof processCommand === 'string' && processCommand.trim()) {
+      return processCommand;
+    }
+  }
+
+  return resourceName;
+}
+
+function xmlEscape(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function systemdServiceContent(plan: DockerRunPlan) {
+  const command = plan.processCommand ?? plan.containerName;
+  const args = plan.serviceArgs ?? [];
+  const execStart = [command, ...args].map(shellQuote).join(' ');
+
+  return `[Unit]
+Description=The Containers managed service ${plan.appPayload.name}
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=${execStart}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+`;
+}
+
+function launchdServiceContent(plan: DockerRunPlan) {
+  const command = plan.processCommand ?? plan.containerName;
+  const args = plan.serviceArgs ?? [];
+  const serviceName = plan.serviceName ?? binaryServiceName(plan.containerName);
+  const logDir = path.join(config.deploymentsPath, plan.containerName, 'logs');
+  const stdoutPath = path.join(logDir, 'stdout.log');
+  const stderrPath = path.join(logDir, 'stderr.log');
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${xmlEscape(serviceName)}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${xmlEscape(command)}</string>
+${args.map((arg) => `    <string>${xmlEscape(arg)}</string>`).join('\n')}
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>${xmlEscape(stdoutPath)}</string>
+  <key>StandardErrorPath</key>
+  <string>${xmlEscape(stderrPath)}</string>
+</dict>
+</plist>
+`;
+}
+
+function binaryProcessPattern(resourceName = 'binary-service') {
+  return resourceName.replace(/[\\[\]().*+?^${}|]/g, '\\$&');
+}
+
+async function findBinaryServicePids(resourceName = 'binary-service') {
+  if (process.platform === 'win32') {
+    return [];
+  }
+
+  try {
+    const output = await commandOutput('pgrep', ['-f', binaryProcessPattern(resourceName)]);
+    return output
+      .split('\n')
+      .map((line) => Number(line.trim()))
+      .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+  } catch {
+    return [];
+  }
+}
+
+async function waitForPort(port: number, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (!(await checkPortAvailable(port))) {
+      return true;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+
+  return false;
+}
+
+async function startBinaryServiceProcess(plan: DockerRunPlan) {
+  const command = plan.processCommand ?? plan.containerName;
+  const args = plan.processArgs ?? [];
+  const existingPids = await findBinaryServicePids(command);
+
+  if (existingPids.length > 0) {
+    return existingPids.join(',');
+  }
+
+  await execFileAsync(command, args, {
+    timeout: 15_000,
+    maxBuffer: 1024 * 1024
+  });
+  await waitForPort(plan.hostPort ?? plan.containerPort).catch(() => false);
+  return (await findBinaryServicePids(plan.containerName)).join(',') || command;
+}
+
+async function stopBinaryServiceProcess(resourceName = 'binary-service') {
+  const pids = await findBinaryServicePids(resourceName);
+
+  for (const pid of pids) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {
+      // The process may have exited between pgrep and kill.
+    }
+  }
+
+  return pids;
+}
+
+async function installAndStartBinaryService(plan: DockerRunPlan) {
+  if (plan.serviceKind === 'systemd_user' && plan.serviceName && plan.serviceFilePath) {
+    await fs.mkdir(path.dirname(plan.serviceFilePath), { recursive: true });
+    await fs.writeFile(plan.serviceFilePath, systemdServiceContent(plan), 'utf8');
+    await execFileAsync('systemctl', ['--user', 'daemon-reload'], {
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024
+    });
+    await execFileAsync('systemctl', ['--user', 'enable', '--now', `${plan.serviceName}.service`], {
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    });
+    await waitForPort(plan.hostPort ?? plan.containerPort).catch(() => false);
+    return plan.serviceFilePath;
+  }
+
+  if (plan.serviceKind === 'launchd_user' && plan.serviceName && plan.serviceFilePath) {
+    await fs.mkdir(path.dirname(plan.serviceFilePath), { recursive: true });
+    await fs.mkdir(path.join(config.deploymentsPath, plan.containerName, 'logs'), { recursive: true });
+    await fs.writeFile(plan.serviceFilePath, launchdServiceContent(plan), 'utf8');
+    const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
+    await execFileAsync('launchctl', ['bootout', `${domain}/${plan.serviceName}`], {
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024
+    }).catch(() => undefined);
+    await execFileAsync('launchctl', ['bootstrap', domain, plan.serviceFilePath], {
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    });
+    await waitForPort(plan.hostPort ?? plan.containerPort).catch(() => false);
+    return plan.serviceFilePath;
+  }
+
+  return startBinaryServiceProcess(plan);
+}
+
+async function binaryServiceStatus(resourceName: string, deployInput?: unknown) {
+  const serviceName =
+    deployInput && typeof deployInput === 'object' && 'serviceName' in deployInput
+      ? String((deployInput as { serviceName?: unknown }).serviceName ?? binaryServiceName(resourceName))
+      : binaryServiceName(resourceName);
+  const serviceKind =
+    deployInput && typeof deployInput === 'object' && 'serviceKind' in deployInput
+      ? (deployInput as { serviceKind?: DockerRunPlan['serviceKind'] }).serviceKind
+      : binaryServiceKind();
+
+  if (serviceKind === 'systemd_user') {
+    try {
+      const active = await commandOutput('systemctl', ['--user', 'is-active', `${serviceName}.service`]);
+      const enabled = await commandOutput('systemctl', ['--user', 'is-enabled', `${serviceName}.service`]).catch(() => 'disabled');
+
+      return {
+        running: active === 'active',
+        state: `${active}${enabled ? `, ${enabled}` : ''}`,
+        serviceName,
+        serviceKind,
+        pids: await findBinaryServicePids(binaryProcessName(resourceName, deployInput))
+      };
+    } catch {
+      return {
+        running: false,
+        state: 'inactive',
+        serviceName,
+        serviceKind,
+        pids: await findBinaryServicePids(binaryProcessName(resourceName, deployInput))
+      };
+    }
+  }
+
+  if (serviceKind === 'launchd_user') {
+    const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
+    const running = await execFileAsync('launchctl', ['print', `${domain}/${serviceName}`], {
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024
+    }).then(() => true).catch(() => false);
+
+    return {
+      running,
+      state: running ? 'loaded' : 'unloaded',
+      serviceName,
+      serviceKind,
+      pids: await findBinaryServicePids(binaryProcessName(resourceName, deployInput))
+    };
+  }
+
+  const pids = await findBinaryServicePids(binaryProcessName(resourceName, deployInput));
+
+  return {
+    running: pids.length > 0,
+    state: pids.length > 0 ? 'running' : 'stopped',
+    serviceName,
+    serviceKind: 'process' as const,
+    pids
+  };
+}
+
+async function controlBinaryService(
+  action: 'start' | 'stop' | 'restart',
+  resourceName: string,
+  deployInput?: unknown
+) {
+  const plan = deployInput ? await buildBinaryServicePlanFromInput(deployInput) : null;
+  const serviceName = plan?.serviceName ?? binaryServiceName(resourceName);
+  const serviceKind = plan?.serviceKind ?? binaryServiceKind();
+
+  if (serviceKind === 'systemd_user') {
+    await execFileAsync('systemctl', ['--user', action, `${serviceName}.service`], {
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    });
+    return;
+  }
+
+  if (serviceKind === 'launchd_user') {
+    const serviceFilePath = plan?.serviceFilePath ?? launchdPlistPath(serviceName);
+    const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
+
+    if (action === 'restart') {
+      await execFileAsync('launchctl', ['kickstart', '-k', `${domain}/${serviceName}`], {
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024
+      });
+      return;
+    }
+
+    if (action === 'stop') {
+      await execFileAsync('launchctl', ['bootout', `${domain}/${serviceName}`], {
+        timeout: 10_000,
+        maxBuffer: 1024 * 1024
+      }).catch(() => undefined);
+    }
+
+    if (action === 'start') {
+      await execFileAsync('launchctl', ['bootstrap', domain, serviceFilePath], {
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024
+      });
+    }
+    return;
+  }
+
+  if (action === 'stop' || action === 'restart') {
+    await stopBinaryServiceProcess(binaryProcessName(resourceName, deployInput));
+  }
+
+  if (action === 'start' || action === 'restart') {
+    if (!plan) {
+      throw new DeployInputError('This binary service is missing start metadata.');
+    }
+    await startBinaryServiceProcess(plan);
+  }
+}
+
+async function removeBinaryService(resourceName: string, deployInput?: unknown) {
+  const plan = deployInput ? await buildBinaryServicePlanFromInput(deployInput) : null;
+  const serviceName = plan?.serviceName ?? binaryServiceName(resourceName);
+  const serviceKind = plan?.serviceKind ?? binaryServiceKind();
+  const serviceFilePath = plan?.serviceFilePath ??
+    (serviceKind === 'systemd_user' ? systemdUserServicePath(serviceName) : launchdPlistPath(serviceName));
+
+  if (serviceKind === 'systemd_user') {
+    await execFileAsync('systemctl', ['--user', 'disable', '--now', `${serviceName}.service`], {
+      timeout: 30_000,
+      maxBuffer: 1024 * 1024
+    }).catch(() => undefined);
+    await fs.rm(serviceFilePath, { force: true }).catch(() => undefined);
+    await execFileAsync('systemctl', ['--user', 'daemon-reload'], {
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024
+    }).catch(() => undefined);
+    return;
+  }
+
+  if (serviceKind === 'launchd_user') {
+    const domain = `gui/${process.getuid?.() ?? os.userInfo().uid}`;
+    await execFileAsync('launchctl', ['bootout', `${domain}/${serviceName}`], {
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024
+    }).catch(() => undefined);
+    await fs.rm(serviceFilePath, { force: true }).catch(() => undefined);
+    return;
+  }
+
+  await stopBinaryServiceProcess(binaryProcessName(resourceName, deployInput));
+}
+
+async function binaryServiceLogs(resourceName: string, deployInput?: unknown, tail = 200) {
+  const plan = deployInput ? await buildBinaryServicePlanFromInput(deployInput) : null;
+  const serviceName = plan?.serviceName ?? binaryServiceName(resourceName);
+  const serviceKind = plan?.serviceKind ?? binaryServiceKind();
+
+  if (serviceKind === 'systemd_user') {
+    const result = await execFileAsync('journalctl', [
+      '--user',
+      '-u',
+      `${serviceName}.service`,
+      '-n',
+      String(tail),
+      '--no-pager'
+    ], {
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024
+    });
+    return [result.stdout, result.stderr].filter(Boolean).join('\n').trimEnd();
+  }
+
+  if (serviceKind === 'launchd_user') {
+    const logDir = path.join(config.deploymentsPath, resourceName, 'logs');
+    const result = await execFileAsync('tail', ['-n', String(tail), path.join(logDir, 'stdout.log'), path.join(logDir, 'stderr.log')], {
+      timeout: 10_000,
+      maxBuffer: 1024 * 1024
+    }).catch(() => null);
+    return result ? [result.stdout, result.stderr].filter(Boolean).join('\n').trimEnd() : 'No launchd logs returned yet.';
+  }
+
+  return 'This binary service is running as a direct process. Install it through systemd or launchd for managed logs.';
+}
+
+async function buildBinaryServicePlanFromInput(
+  input: unknown,
+  checkPort = false
+): Promise<DockerRunPlan> {
+  const parsed = deployInputSchema.parse(input);
+
+  if (parsed.method !== 'binary_service') {
+    throw new DeployInputError('Only Binary/service deployments can be managed as local services.');
+  }
+
+  const command = parsed.command;
+  const binary = parseBinaryServiceCommand(command);
+  const executablePath = await resolveCommandPath(binary.executable);
+  const webPort = parsed.hostPort ?? parsed.containerPort ?? null;
+
+  if (!webPort) {
+    throw new DeployInputError('Enter the local port where this service exposes its web UI before deploying.');
+  }
+
+  if (checkPort) {
+    const portCheck = await binaryServicePortRequirement(webPort);
+
+    if (portCheck.status === 'blocked') {
+      throw new DeployInputError(portCheck.detail);
+    }
+  }
+
+  const executableName = path.basename(binary.executable).replace(/\.[^.]+$/, '');
+  const baseName = parsed.name ?? executableName;
+  const containerName = slugify(baseName) || slugify(executableName) || 'binary-service';
+  const serviceName = binaryServiceName(containerName);
+  const serviceKind = binaryServiceKind();
+  const serviceFilePath =
+    serviceKind === 'systemd_user'
+      ? systemdUserServicePath(serviceName)
+      : serviceKind === 'launchd_user'
+        ? launchdPlistPath(serviceName)
+        : undefined;
+  const routeMode = parsed.routeMode;
+  const publicPath =
+    routeMode === 'subpath'
+      ? parsed.publicPath ?? `/${slugify(containerName) || 'app'}`
+      : null;
+  const targetUrl = targetUrlForPort(webPort);
+  const appPayload = {
+    name: baseName,
+    iconType: 'builtin' as const,
+    iconValue: null,
+    targetUrl,
+    routeMode,
+    publicHost: parsed.publicHost,
+    publicPath,
+    enabled: parsed.enabled,
+    sortOrder: 0,
+    category: parsed.category ?? 'Self-hosted',
+    tags: parsed.tags,
+    favorite: parsed.favorite
+  };
+
+  return {
+    method: 'binary_service',
+    containerName,
+    image: executableName,
+    publishMode: parsed.publishMode,
+    hostPort: webPort,
+    containerPort: webPort,
+    protocol: 'tcp',
+    targetUrl,
+    hostMounts: [],
+    appPayload,
+    dockerArgs: [executablePath, ...binary.args],
+    processCommand: executablePath,
+    processArgs: binary.args,
+    serviceArgs: binary.serviceArgs,
+    serviceName,
+    serviceFilePath,
+    serviceKind,
+    resolvedDeployInput: {
+      ...resolvedDeployInput(parsed, {
+        method: 'binary_service',
+        hostPort: webPort,
+        containerPort: webPort,
+        appPayload
+      }),
+      serviceName,
+      serviceKind,
+      serviceFilePath,
+      processCommand: executablePath,
+      processArgs: binary.args,
+      serviceArgs: binary.serviceArgs
+    },
+    warnings: [
+      serviceKind === 'systemd_user'
+        ? `The Containers will install and start a user systemd service at ${serviceFilePath}.`
+        : serviceKind === 'launchd_user'
+          ? `The Containers will install and start a launchd agent at ${serviceFilePath}.`
+          : 'This platform does not expose systemd user services or launchd, so The Containers will fall back to direct process management.',
+      'The service command should stay in the foreground so the service manager can track and restart it.',
+      `The Web UI is expected on ${targetUrl}. If this service uses a different web port, set the host port before deploying.`,
+      ...(parsed.publishMode === 'public_domain_reverse_proxy'
+        ? [
+            'Public domain mode requires DNS to point to this machine and Caddy to receive public traffic.'
+          ]
+        : [
+            'Reverse proxy mode will bind the host in Caddy; DNS must resolve to this machine for clients to reach it.'
+          ])
+    ]
+  };
+}
+
 export class DeployService {
   private readonly repo: DeploymentsRepo;
 
@@ -2406,12 +3026,11 @@ export class DeployService {
         {
           id: 'binary_service',
           name: 'Binary or system service',
-          status: 'planned',
+          status: 'available',
           capabilities: [
-            'release-asset',
-            'systemd',
-            'launchd',
-            'windows-service',
+            'local-binary',
+            'daemon',
+            'manual-port',
             'reverse-proxy'
           ]
         },
@@ -2450,6 +3069,132 @@ export class DeployService {
       status: 'pass',
       detail: `${os.userInfo().username || 'unknown'} on ${process.platform}`
     });
+
+    if (doctorMethod === 'binary_service') {
+      const command = parsedDoctorInput.success
+        ? parsedDoctorInput.data.command?.trim() || ''
+        : '';
+
+      if (!command) {
+        checks.push({
+          id: 'binary-command',
+          label: 'Binary service command',
+          status: 'fail',
+          detail: 'Enter the command that starts this service.'
+        });
+
+        return {
+          ok: false,
+          dockerBin,
+          dockerHost: process.env.DOCKER_HOST ?? null,
+          dockerConfig: process.env.DOCKER_CONFIG ?? null,
+          platform: process.platform,
+          checks,
+          requirements,
+          userHelpRequired: true,
+          grantSteps
+        };
+      }
+
+      const parsedCommand = parseBinaryServiceCommand(command);
+      const executablePath = await resolveCommandPath(parsedCommand.executable);
+
+      try {
+        await fs.access(executablePath, fsConstants.X_OK);
+        checks.push({
+          id: 'binary-command',
+          label: 'Binary service command',
+          status: 'pass',
+          detail: executablePath
+        });
+      } catch (error) {
+        checks.push({
+          id: 'binary-command',
+          label: 'Binary service command',
+          status: 'fail',
+          detail: commandDetail(error)
+        });
+        grantSteps.push({
+          title: 'Install the service binary',
+          description: 'Install the binary or provide a full executable path in the Binary/service command.',
+          commands: process.platform === 'darwin'
+            ? [`which ${path.basename(parsedCommand.executable)}`]
+            : process.platform === 'linux'
+              ? [`which ${path.basename(parsedCommand.executable)}`]
+              : ['Install the service binary and provide its full path.']
+        });
+      }
+
+      const serviceKind = binaryServiceKind();
+
+      if (serviceKind === 'systemd_user') {
+        try {
+          const version = await commandOutput('systemctl', ['--version']);
+          checks.push({
+            id: 'service-manager',
+            label: 'User systemd',
+            status: 'pass',
+            detail: version.split('\n')[0] ?? 'systemctl is available'
+          });
+        } catch (error) {
+          checks.push({
+            id: 'service-manager',
+            label: 'User systemd',
+            status: 'fail',
+            detail: commandDetail(error)
+          });
+          grantSteps.push({
+            title: 'Enable user systemd',
+            description: 'Binary/service deployments install a user service so the process survives restarts.',
+            commands: [
+              'systemctl --user status',
+              'loginctl enable-linger "$USER"'
+            ]
+          });
+        }
+      } else if (serviceKind === 'launchd_user') {
+        try {
+          await commandOutput('launchctl', ['help']);
+          checks.push({
+            id: 'service-manager',
+            label: 'launchd',
+            status: 'pass',
+            detail: 'launchctl is available'
+          });
+        } catch (error) {
+          checks.push({
+            id: 'service-manager',
+            label: 'launchd',
+            status: 'fail',
+            detail: commandDetail(error)
+          });
+        }
+      } else {
+        checks.push({
+          id: 'service-manager',
+          label: 'Service manager',
+          status: 'warn',
+          detail: 'No supported service manager was found for this platform; deploy will fall back to direct process management.'
+        });
+      }
+
+      const commandBlocked = requirements.some((requirement) => requirement.status === 'blocked');
+      const userHelpRequired =
+        checks.some((check) => check.status === 'fail') ||
+        requirements.some((requirement) => requirement.userHelpRequired);
+
+      return {
+        ok: checks.every((check) => check.status !== 'fail') && !commandBlocked,
+        dockerBin,
+        dockerHost: process.env.DOCKER_HOST ?? null,
+        dockerConfig: process.env.DOCKER_CONFIG ?? null,
+        platform: process.platform,
+        checks,
+        requirements,
+        userHelpRequired,
+        grantSteps
+      };
+    }
 
     checks.push({
       id: 'docker-bin-config',
@@ -2606,16 +3351,20 @@ export class DeployService {
         }
         await writeComposeFile(plan.containerName, plan.composeContent);
       }
-      const { stdout } = plan.method === 'docker_compose'
+      if (plan.method === 'binary_service') {
+        containerId = await installAndStartBinaryService(plan);
+      } else {
+        const { stdout } = plan.method === 'docker_compose'
         ? await runDockerComposeCommand(plan.dockerArgs.slice(1), {
             timeout: 240_000
           })
         : await runDockerCommand(plan.dockerArgs, {
             timeout: 240_000
           });
-      containerId = plan.method === 'docker_compose'
-        ? plan.composeProjectDir ?? plan.containerName
-        : stdout.trim();
+        containerId = plan.method === 'docker_compose'
+          ? plan.composeProjectDir ?? plan.containerName
+          : stdout.trim();
+      }
     } catch (error) {
       const detail = commandDetail(error);
 
@@ -2644,7 +3393,11 @@ export class DeployService {
       if (created.app) {
         this.repo.create({
           appId: created.app.id,
-          provider: plan.method === 'docker_compose' ? 'docker_compose' : 'docker',
+          provider: plan.method === 'docker_compose'
+            ? 'docker_compose'
+            : plan.method === 'binary_service'
+              ? 'binary_service'
+              : 'docker',
           resourceId: containerId,
           resourceName: plan.containerName,
           deployInput: plan.resolvedDeployInput
@@ -2662,6 +3415,8 @@ export class DeployService {
             '--volumes',
             '--remove-orphans'
           ]).catch(() => undefined);
+        } else if (plan.method === 'binary_service') {
+          await removeBinaryService(plan.containerName, plan.resolvedDeployInput).catch(() => undefined);
         } else {
           await runDockerCommand(['rm', '-fv', plan.containerName]).catch(() => undefined);
         }
@@ -2719,6 +3474,21 @@ export class DeployService {
       };
     }
 
+    if (deployment.provider === 'binary_service') {
+      const service = await binaryServiceStatus(deployment.resourceName, deployment.deployInput);
+
+      return {
+        ...publicDeployment,
+        runtime: {
+          kind: 'binary_service' as const,
+          running: service.running,
+          state: service.state,
+          command: service.serviceName,
+          pids: service.pids
+        }
+      };
+    }
+
     try {
       const container = await inspectContainer(deployment.resourceName);
 
@@ -2760,6 +3530,10 @@ export class DeployService {
     }
 
     if (action === 'pull') {
+      if (deployment.provider === 'binary_service') {
+        throw new DeployInputError('Pull is not available for local binary service deployments.');
+      }
+
       if (deployment.provider === 'docker_compose') {
         await runDockerComposeCommand([
           '-p',
@@ -2783,6 +3557,23 @@ export class DeployService {
     }
 
     if (action === 'redeploy') {
+      if (deployment.provider === 'binary_service') {
+        if (!deployment.deployInput) {
+          throw new DeployInputError('This binary service deployment is missing redeploy metadata.');
+        }
+
+        const plan = await this.buildPlan(deployment.deployInput, false);
+        await removeBinaryService(deployment.resourceName, deployment.deployInput);
+        const resourceId = await installAndStartBinaryService(plan);
+        this.repo.updateRuntime({
+          appId,
+          resourceId,
+          resourceName: plan.containerName,
+          deployInput: plan.resolvedDeployInput
+        });
+        return this.managedDeploymentStatus(appId);
+      }
+
       if (deployment.provider === 'docker_compose') {
         await runDockerComposeCommand([
           '-p',
@@ -2833,6 +3624,11 @@ export class DeployService {
         path.join(deployment.resourceId, 'compose.yml'),
         action
       ]);
+    } else if (deployment.provider === 'binary_service') {
+      if (!deployment.deployInput) {
+        throw new DeployInputError('This binary service deployment is missing service metadata.');
+      }
+      await controlBinaryService(action, deployment.resourceName, deployment.deployInput);
     } else {
       await runDockerCommand([action, deployment.resourceName]);
     }
@@ -2879,6 +3675,59 @@ export class DeployService {
         removed: [
           'Orphaned containers from the same managed Compose project may be removed.',
           'Images are not deleted.'
+        ],
+        warnings
+      };
+    }
+
+    if (deployment.provider === 'binary_service') {
+      const service = await binaryServiceStatus(deployment.resourceName, deployment.deployInput);
+
+      if (!deployment.deployInput) {
+        return {
+          appId,
+          provider: deployment.provider,
+          resourceName: deployment.resourceName,
+          canRedeploy: false,
+          image: null,
+          targetUrl: null,
+          hostPort: null,
+          containerPort: null,
+          composeFilePath: null,
+          currentState: service.state,
+          actions: [],
+          preserved: ['The existing app record and route are preserved.'],
+          removed: [],
+          warnings: ['This binary service deployment is missing saved metadata.']
+        };
+      }
+
+      const plan = await this.buildPlan(deployment.deployInput, false);
+
+      return {
+        appId,
+        provider: deployment.provider,
+        resourceName: deployment.resourceName,
+        canRedeploy: true,
+        image: plan.image,
+        targetUrl: plan.targetUrl,
+        hostPort: plan.hostPort,
+        containerPort: plan.containerPort,
+        composeFilePath: null,
+        currentState: service.state,
+        actions: [
+          'Remove and reinstall the managed local service definition.',
+          'Start the service through the host service manager.',
+          'Keep The Containers app route, public host, and proxy settings.'
+        ],
+        preserved: [
+          'Service data outside the generated service file is preserved.',
+          'The managed service file is recreated from saved metadata.',
+          'The existing app record and route are preserved.',
+          `The Web UI port ${plan.hostPort ?? plan.containerPort} is reused.`
+        ],
+        removed: [
+          'Data managed by the service command is not deleted.'
         ],
         warnings
       };
@@ -3036,6 +3885,49 @@ export class DeployService {
           detail: `App target is ${app.targetUrl}.`
         });
       }
+    } else if (deployment.provider === 'binary_service') {
+      const service = await binaryServiceStatus(deployment.resourceName, deployment.deployInput);
+
+      checks.push({
+        id: 'service',
+        label: 'Service',
+        status: service.running ? 'pass' : 'warn',
+        detail: `${service.serviceName} is ${service.state}.`
+      });
+      if (!service.running) {
+        repairs.push({
+          id: 'start',
+          label: 'Start service',
+          detail: 'Start the managed local service.',
+          severity: 'safe'
+        });
+      }
+
+      if (!deployment.deployInput) {
+        checks.push({
+          id: 'redeploy-metadata',
+          label: 'Redeploy metadata',
+          status: 'warn',
+          detail: 'This binary service deployment is missing saved metadata, so safe redeploy is disabled.'
+        });
+      } else {
+        const plan = await this.buildPlan(deployment.deployInput, false);
+        const appPort = targetPort(app.targetUrl);
+        checks.push({
+          id: 'target-port',
+          label: 'Target port',
+          status: appPort === (plan.hostPort ?? plan.containerPort) ? 'pass' : 'warn',
+          detail: `App target ${app.targetUrl}; saved port ${plan.hostPort ?? plan.containerPort}.`
+        });
+        if (appPort !== (plan.hostPort ?? plan.containerPort)) {
+          repairs.push({
+            id: 'update_target_from_runtime',
+            label: 'Update app target',
+            detail: `Update the app target to ${targetUrlForPort(plan.hostPort ?? plan.containerPort)}.`,
+            severity: 'safe'
+          });
+        }
+      }
     } else {
       let container: DockerInspectContainer | null = null;
 
@@ -3174,6 +4066,11 @@ export class DeployService {
       ) {
         port = (deployment.deployInput as { hostPort: number }).hostPort;
       }
+    } else if (deployment.provider === 'binary_service') {
+      if (deployment.deployInput) {
+        const plan = await this.buildPlan(deployment.deployInput, false);
+        port = plan.hostPort ?? plan.containerPort;
+      }
     } else {
       const container = await inspectContainer(deployment.resourceName);
 
@@ -3221,6 +4118,16 @@ export class DeployService {
     }
 
     const safeTail = Math.max(20, Math.min(1000, tail));
+    if (deployment.provider === 'binary_service') {
+      return {
+        appId,
+        provider: deployment.provider,
+        resourceName: deployment.resourceName,
+        tail: safeTail,
+        logs: await binaryServiceLogs(deployment.resourceName, deployment.deployInput, safeTail)
+      };
+    }
+
     const result = deployment.provider === 'docker_compose'
       ? await runDockerComposeCommand([
           '-p',
@@ -3271,6 +4178,8 @@ export class DeployService {
           await removeComposeProjectContainers(deployment.resourceName).catch(() => undefined);
         }
         await fs.rm(deployment.resourceId, { recursive: true, force: true }).catch(() => undefined);
+      } else if (deployment.provider === 'binary_service') {
+        await removeBinaryService(deployment.resourceName, deployment.deployInput);
       } else {
         await runDockerCommand(['rm', '-fv', deployment.resourceName]);
       }
@@ -3295,6 +4204,10 @@ export class DeployService {
 
     if (parsed.method === 'docker_compose') {
       return this.buildComposePlan(parsed, allocateHostPort);
+    }
+
+    if (parsed.method === 'binary_service') {
+      return this.buildBinaryServicePlan(parsed, allocateHostPort);
     }
 
     if (parsed.method !== 'docker_run') {
@@ -3530,5 +4443,12 @@ export class DeployService {
             ])
       ]
     };
+  }
+
+  private async buildBinaryServicePlan(
+    parsed: z.infer<typeof deployInputSchema>,
+    checkPort: boolean
+  ): Promise<DockerRunPlan> {
+    return buildBinaryServicePlanFromInput(parsed, checkPort);
   }
 }

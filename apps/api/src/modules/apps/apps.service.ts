@@ -149,7 +149,7 @@ const importSchema = z.object({
 const deploymentBackupSchema = z.array(
   z.object({
     appId: z.string().min(1),
-    provider: z.enum(['docker', 'docker_compose']),
+    provider: z.enum(['docker', 'docker_compose', 'binary_service']),
     resourceId: z.string().min(1),
     resourceName: z.string().min(1),
     deployInput: z.unknown().nullable().optional(),
@@ -645,7 +645,7 @@ export class AppsService {
       )
       .all() as Array<{
         appId: string;
-        provider: 'docker' | 'docker_compose';
+        provider: 'docker' | 'docker_compose' | 'binary_service';
         resourceId: string;
         resourceName: string;
         deployInput: string | null;

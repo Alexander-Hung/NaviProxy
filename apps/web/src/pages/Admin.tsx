@@ -131,8 +131,8 @@ const deployMethods: Array<{
   {
     id: 'binary_service',
     title: 'Binary/service',
-    detail: 'release asset or system service',
-    status: 'planned'
+    detail: 'Run a local daemon command',
+    status: 'available'
   },
   {
     id: 'custom_command',
@@ -1648,7 +1648,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
 
   async function previewDeploy() {
     if (selectedDeployMethod.status !== 'available') {
-      setError(`${selectedDeployMethod.title} is planned. Docker run and Docker Compose are available now.`);
+      setError(`${selectedDeployMethod.title} is planned. Docker run, Docker Compose, and Binary/service are available now.`);
       return;
     }
 
@@ -1669,7 +1669,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
 
   async function deployDockerRun() {
     if (selectedDeployMethod.status !== 'available') {
-      setError(`${selectedDeployMethod.title} is planned. Docker run and Docker Compose are available now.`);
+      setError(`${selectedDeployMethod.title} is planned. Docker run, Docker Compose, and Binary/service are available now.`);
       return;
     }
 
@@ -1683,7 +1683,9 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
 
     const confirmation = currentDoctor.userHelpRequired
       ? 'This command needs user review because it requests host-level access. Deploy it and create a public route?'
-      : 'Deploy this Docker container and create a public route?';
+      : deployForm.method === 'binary_service'
+        ? 'Start this binary service and create a public route?'
+        : 'Deploy this Docker container and create a public route?';
 
     if (!window.confirm(confirmation)) {
       return;
@@ -2234,6 +2236,8 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                         <div className="text-xs text-black/55 dark:text-[#b8c7c1]">
                           {deploymentStatus.provider === 'docker_compose'
                             ? `Docker Compose · ${deploymentStatus.runtime.kind === 'docker_compose' ? deploymentStatus.runtime.composeFilePath : ''}`
+                            : deploymentStatus.provider === 'binary_service'
+                              ? `Local daemon · ${deploymentStatus.runtime.kind === 'binary_service' ? deploymentStatus.runtime.command : ''}`
                             : `Docker container · ${deploymentStatus.runtime.kind === 'docker' ? deploymentStatus.runtime.containerId.slice(0, 12) : ''}`}
                         </div>
                       </div>
@@ -2268,8 +2272,8 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                     <button
                       className="btn-secondary h-9"
                       onClick={() => void runDeploymentAction('pull')}
-                      disabled={Boolean(deploymentAction)}
-                      title="Pull latest image"
+                      disabled={Boolean(deploymentAction) || deploymentStatus?.provider === 'binary_service'}
+                      title={deploymentStatus?.provider === 'binary_service' ? 'Local daemons do not support image pull' : 'Pull latest image'}
                     >
                       <Download
                         size={15}
@@ -2480,7 +2484,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                     Deploy self-hosted app
                   </h3>
                   <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
-                    Docker run command, auto port, and public route
+                    Docker, binary services, auto port, and public route
                   </p>
                 </div>
                 <button
@@ -2508,6 +2512,17 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                       }`}
                       onClick={() => {
                         updateDeploy('method', method.id);
+                        if (method.id === 'binary_service') {
+                          setDeployForm((current) => ({
+                            ...current,
+                            method: 'binary_service',
+                            command: current.method === 'binary_service' ? current.command : '',
+                            name: current.method === 'binary_service' ? current.name : '',
+                            hostPort: current.method === 'binary_service' ? current.hostPort : null,
+                            containerPort: current.method === 'binary_service' ? current.containerPort : null,
+                            category: current.category || 'Self-hosted'
+                          }));
+                        }
                       }}
                     >
                       <span className="flex items-center justify-between gap-2">
@@ -2530,7 +2545,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                 </div>
                 {selectedDeployMethod.status === 'planned' ? (
                   <div className="mt-2 rounded border border-amber/30 bg-amber/10 p-3 text-xs text-black/65 dark:text-[#d5caa2]">
-                    {selectedDeployMethod.title} is queued for the universal GitHub deploy flow. Use Docker run now, or add the repo as an existing service after starting it manually.
+                    {selectedDeployMethod.title} is queued for the universal GitHub deploy flow. Use Docker run, Docker Compose, or Binary/service now, or add the repo as an existing service after starting it manually.
                   </div>
                 ) : null}
               </div>
@@ -2541,7 +2556,9 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                     ? 'Docker command'
                     : deployForm.method === 'docker_compose'
                       ? 'Compose file'
-                    : `${selectedDeployMethod.title} input`}
+                      : deployForm.method === 'binary_service'
+                        ? 'Binary service command'
+                        : `${selectedDeployMethod.title} input`}
                 </label>
                 <textarea
                   id="deployCommand"
@@ -2553,7 +2570,9 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                       ? 'docker run -d --name app -p 8080:80 image:tag'
                       : deployForm.method === 'docker_compose'
                         ? 'services:\n  app:\n    image: nginx:alpine\n    ports:\n      - "8080:80"'
-                      : 'This deploy method is planned'
+                        : deployForm.method === 'binary_service'
+                          ? '/usr/local/bin/my-service --port 8080'
+                          : 'This deploy method is planned'
                   }
                   disabled={selectedDeployMethod.status !== 'available'}
                 />
@@ -2956,7 +2975,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                     {deploymentLogs.resourceName}
                   </h3>
                   <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
-                    Last {deploymentLogs.tail} lines · {deploymentLogs.provider === 'docker_compose' ? 'Docker Compose' : 'Docker'}
+                    Last {deploymentLogs.tail} lines · {deploymentLogs.provider === 'docker_compose' ? 'Docker Compose' : deploymentLogs.provider === 'binary_service' ? 'Local daemon' : 'Docker'}
                   </p>
                 </div>
                 <button
@@ -3000,7 +3019,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                     {redeployPreview.resourceName}
                   </h3>
                   <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
-                    {redeployPreview.provider === 'docker_compose' ? 'Docker Compose' : 'Docker'} · {redeployPreview.currentState}
+                    {redeployPreview.provider === 'docker_compose' ? 'Docker Compose' : redeployPreview.provider === 'binary_service' ? 'Local daemon' : 'Docker'} · {redeployPreview.currentState}
                   </p>
                 </div>
                 <button
