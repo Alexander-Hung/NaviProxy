@@ -1,6 +1,6 @@
 # The Containers
 
-The Containers is a lightweight homelab dashboard, reverse proxy controller, and self-host deployment manager. It gives users one place to register existing services, deploy Docker-based apps, assign ports, bind routes, check health, and keep Caddy reverse proxy configuration in sync.
+The Containers is a lightweight homelab dashboard, reverse proxy controller, and self-host deployment manager. It gives users one place to register existing services, deploy Docker-based apps and local binary services, assign ports, bind routes, check health, and keep Caddy reverse proxy configuration in sync.
 
 The project is designed for mini PCs, NAS boxes, Raspberry Pi hosts, home servers, and small cloud machines. It treats services as plain HTTP upstreams, so Docker, Docker Compose, bare-metal processes, NAS apps, and LAN devices can all appear in the same dashboard.
 
@@ -16,6 +16,7 @@ Available now:
 - DNS diagnostics for route and public domain checks.
 - Docker run deployments with command parsing, automatic port assignment, permission checks, and managed cleanup.
 - Docker Compose deployments with YAML parsing, web service selection, port inference, bind mount checks, host network handling, and managed cleanup.
+- Binary/service deployments for local HTTP services, installed as user systemd services on Linux or launchd agents on macOS.
 - Host permission panel for Docker CLI, Docker daemon, Compose runtime, bind mounts, privileged containers, capabilities, devices, host networking, Docker socket mounts, public domain DNS, and Caddy sync.
 - Managed deployment records. Apps deployed by The Containers are marked as managed and are cleaned up when deleted.
 - Managed deployment controls for start, stop, restart, logs, image pull, redeploy, and redeploy safety preview.
@@ -29,7 +30,6 @@ Planned:
 - Static site deployments.
 - Node.js app deployments.
 - Python app deployments.
-- Binary or service deployments.
 - Advanced custom command deployments.
 - Multi-host or agent-based management.
 
@@ -39,7 +39,7 @@ Planned:
 - API: Node.js, Fastify
 - Database: SQLite
 - Reverse proxy: Caddy Admin API
-- Deploy runtime: Docker CLI and Docker Compose
+- Deploy runtime: Docker CLI, Docker Compose, user systemd, and launchd
 
 ## Development
 
@@ -117,25 +117,28 @@ The Containers can deploy from:
 
 - `docker run` commands
 - Docker Compose YAML
+- Binary/service commands for local HTTP services
 
 The deploy flow is:
 
-1. Paste a command or Compose file.
+1. Paste a Docker command, Compose file, or Binary/service command.
 2. The Containers auto-fills app name, route host, and ports when possible.
 3. Review Host permission checks.
 4. Preview the deployment plan.
 5. Deploy.
 6. The Containers creates the app route and saves a managed deployment record.
 
-When a managed app is deleted, The Containers attempts to remove the related Docker container or Compose project and free the route.
+Binary/service deployments require the local web port where the service listens. The Containers does not auto-remap Binary/service ports because the user-provided command controls the listener. On Linux, Binary/service deployments are installed as user systemd services. On macOS, they are installed as launchd agents.
+
+When a managed app is deleted, The Containers attempts to remove the related Docker container, Compose project, or local service and free the route.
 
 ## Managed Deployment Operations
 
 Apps deployed by The Containers receive a `Self-Host` badge and a managed deployment record. From the Admin app details view, managed apps can be:
 
 - Started, stopped, and restarted.
-- Inspected with runtime status and Compose container details.
-- Viewed through recent Docker or Docker Compose logs.
+- Inspected with runtime status, Compose container details, or local service status.
+- Viewed through recent Docker, Docker Compose, journalctl, or launchd logs.
 - Updated with image pull.
 - Redeployed from saved deployment metadata.
 - Checked for deployment drift.
@@ -148,6 +151,7 @@ Deployment drift checks can detect:
 - Missing Docker containers or Compose project containers.
 - Stopped managed deployments.
 - Missing managed Compose files.
+- Stopped managed local services.
 - App target ports that no longer match saved deployment metadata or runtime ports.
 - Docker run deployments that are missing redeploy metadata.
 
@@ -162,15 +166,17 @@ It can automatically:
 - Allocate safe high ports.
 - Create normal writable bind mount paths.
 - Write managed Compose files.
+- Write managed user systemd services or launchd agents for Binary/service deployments.
 - Call Docker and Docker Compose.
 - Sync Caddy routes.
-- Remove managed containers or Compose projects.
+- Remove managed containers, Compose projects, or local service files.
 - Start, stop, restart, pull, and redeploy managed deployments.
 - Export and restore managed deployment metadata.
 
 It will not silently:
 
 - Run `sudo`.
+- Install root-level system services.
 - Change Docker socket permissions.
 - Modify router port forwarding.
 - Change public DNS records.

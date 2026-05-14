@@ -6,6 +6,25 @@ This project follows [Semantic Versioning](https://semver.org/) while it is publ
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-14
+
+### Added
+
+- Binary/service deployment method for local HTTP services started from user-provided commands.
+- Managed service installation for Binary/service deployments through user systemd on Linux and launchd agents on macOS.
+- Binary/service lifecycle controls for start, stop, restart, logs, redeploy preview, drift checks, and managed cleanup.
+- Binary/service host permission checks for executable availability, service manager availability, and local web port readiness.
+
+### Changed
+
+- Local service deployment ports are now strict for Binary/service deployments. The selected port must be the port the service command listens on, so occupied or privileged ports are blocked instead of auto-remapped.
+- Deployment records now support a `binary_service` provider for managed local services.
+
+### Fixed
+
+- launchd restart now uses `launchctl kickstart -k` for loaded agents.
+- launchd cleanup now targets `gui/<uid>/<label>` so managed agents unload correctly when stopped or deleted.
+
 ## [0.3.0] - 2026-05-14
 
 ### Added

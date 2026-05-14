@@ -143,7 +143,7 @@ export type DeployPayload = {
 };
 
 export type DeployPlan = {
-  method: 'docker_run' | 'docker_compose';
+  method: 'docker_run' | 'docker_compose' | 'binary_service';
   containerName: string;
   image: string;
   publishMode: DeployPayload['publishMode'];
@@ -165,7 +165,7 @@ export type DeployResult = {
 
 export type DeploymentStatus = {
   appId: string;
-  provider: 'docker' | 'docker_compose';
+  provider: 'docker' | 'docker_compose' | 'binary_service';
   resourceId: string;
   resourceName: string;
   createdAt: string;
@@ -190,12 +190,19 @@ export type DeploymentStatus = {
           image: string;
           ports: string;
         }>;
+      }
+    | {
+        kind: 'binary_service';
+        running: boolean;
+        state: string;
+        command: string;
+        pids: number[];
       };
 };
 
 export type DeploymentBackupRecord = {
   appId: string;
-  provider: 'docker' | 'docker_compose';
+  provider: 'docker' | 'docker_compose' | 'binary_service';
   resourceId: string;
   resourceName: string;
   deployInput: unknown | null;
@@ -233,7 +240,7 @@ export type BackupDockerProjectFile = BackupDeploymentFile & {
 
 export type DeploymentLogs = {
   appId: string;
-  provider: 'docker' | 'docker_compose';
+  provider: 'docker' | 'docker_compose' | 'binary_service';
   resourceName: string;
   tail: number;
   logs: string;
@@ -241,7 +248,7 @@ export type DeploymentLogs = {
 
 export type RedeployPreview = {
   appId: string;
-  provider: 'docker' | 'docker_compose';
+  provider: 'docker' | 'docker_compose' | 'binary_service';
   resourceName: string;
   canRedeploy: boolean;
   image: string | null;
@@ -258,7 +265,7 @@ export type RedeployPreview = {
 
 export type DeploymentDrift = {
   appId: string;
-  provider: 'docker' | 'docker_compose';
+  provider: 'docker' | 'docker_compose' | 'binary_service';
   resourceName: string;
   checkedAt: string;
   status: 'pass' | 'warn' | 'fail';
@@ -454,7 +461,7 @@ export const api = {
       ok: true;
       proxySync?: ProxySync;
       deployment?: {
-        provider: 'docker' | 'docker_compose';
+        provider: 'docker' | 'docker_compose' | 'binary_service';
         resourceName: string;
       } | null;
     }>(`/api/apps/${id}`, {

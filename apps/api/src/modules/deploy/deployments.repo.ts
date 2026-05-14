@@ -2,7 +2,7 @@ import type { ContainersDatabase } from '../../db/database.js';
 
 export type DeploymentRecord = {
   appId: string;
-  provider: 'docker' | 'docker_compose';
+  provider: 'docker' | 'docker_compose' | 'binary_service';
   resourceId: string;
   resourceName: string;
   deployInput: unknown | null;
@@ -11,7 +11,7 @@ export type DeploymentRecord = {
 
 type DeploymentRow = {
   app_id: string;
-  provider: 'docker' | 'docker_compose';
+  provider: 'docker' | 'docker_compose' | 'binary_service';
   resource_id: string;
   resource_name: string;
   deploy_input: string | null;
@@ -54,7 +54,7 @@ export class DeploymentsRepo {
 
   create(input: {
     appId: string;
-    provider: 'docker' | 'docker_compose';
+    provider: 'docker' | 'docker_compose' | 'binary_service';
     resourceId: string;
     resourceName: string;
     deployInput?: unknown;
