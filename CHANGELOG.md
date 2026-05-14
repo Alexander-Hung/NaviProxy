@@ -6,11 +6,14 @@ This project follows [Semantic Versioning](https://semver.org/) while it is publ
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-14
+
 ### Added
 
 - Backup bundle discovery for all local Docker containers by default, including Dockge-managed Compose stacks and manually started containers.
 - Backup and restore support for discovered Docker Compose project files.
 - Named Docker volume restore through Docker when host volume paths are not directly writable.
+- Linux autostart setup script that installs missing platform packages, repairs Docker permissions, detects rootless Docker sockets, configures Caddy, and creates a systemd service.
 
 ### Changed
 

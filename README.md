@@ -74,6 +74,20 @@ Fast path after cloning the repository:
 ./start.sh
 ```
 
+For a new Linux server where you want Docker permissions repaired and The Containers started automatically on boot, run:
+
+```bash
+./deploy/setup-autostart.sh
+```
+
+The autostart script installs missing Debian/Ubuntu packages when `apt-get` is available, adds the service user to the `docker` group, detects rootless Docker sockets when present, writes `/etc/the-containers/the-containers.env`, builds the app, installs the Caddyfile, and creates `the-containers.service`.
+
+If you want the service to run as a specific user:
+
+```bash
+THE_CONTAINERS_SERVICE_USER=alexander ./deploy/setup-autostart.sh
+```
+
 ## Environment
 
 Common production variables:
