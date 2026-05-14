@@ -74,6 +74,20 @@ Fast path after cloning the repository:
 ./start.sh
 ```
 
+For a new Linux server where you want Docker permissions repaired and The Containers started automatically on boot, run:
+
+```bash
+./deploy/setup-autostart.sh
+```
+
+The autostart script installs missing Debian/Ubuntu packages when `apt-get` is available, adds the service user to the `docker` group, detects rootless Docker sockets when present, writes `/etc/the-containers/the-containers.env`, builds the app, installs the Caddyfile, and creates `the-containers.service`.
+
+If you want the service to run as a specific user:
+
+```bash
+THE_CONTAINERS_SERVICE_USER=alexander ./deploy/setup-autostart.sh
+```
+
 ## Environment
 
 Common production variables:
@@ -137,7 +151,7 @@ Deployment drift checks can detect:
 - App target ports that no longer match saved deployment metadata or runtime ports.
 - Docker run deployments that are missing redeploy metadata.
 
-Backup exports include apps, settings, managed deployment records, and redeploy metadata. See [docs/migration-checklist.md](docs/migration-checklist.md) before moving The Containers to a new host.
+Backup exports include apps, settings, managed deployment records, redeploy metadata, managed deployment files, discovered Docker Compose project files, and readable Docker bind mount or named volume data. By default, the backup scans all local Docker containers so Dockge-managed stacks and manually started containers can be included in the same bundle. Set `BACKUP_DOCKER_SCOPE=managed` to only include deployments created by The Containers. See [docs/migration-checklist.md](docs/migration-checklist.md) before moving The Containers to a new host.
 
 ## Important Safety Model
 
@@ -162,7 +176,7 @@ It will not silently:
 - Change public DNS records.
 - Expose Caddy Admin API to the public internet.
 - Override protected host paths without user action.
-- Guarantee that app data exists on a new host after restore. Docker volumes and bind mount directories must be backed up or migrated separately.
+- Guarantee that every app data file exists on a new host after restore. The backup restores readable Docker data and uses named Docker volumes when possible, but unreadable host paths, skipped large files, external databases, DNS records, and router rules may still require separate backup.
 
 Host permission checks are shown before deploy so users can see what is ready, what The Containers can handle, and what needs manual host authorization.
 

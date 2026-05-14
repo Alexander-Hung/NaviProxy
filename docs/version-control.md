@@ -1,13 +1,12 @@
 # Version Control
 
-The Containers uses a lightweight release-branch workflow. The goal is to keep `main` stable while still allowing fast solo development.
+The Containers uses a version-branch workflow. The goal is to keep `main` stable, keep day-to-day work in `develop`, and only create release branches for major/minor version lines.
 
 ## Branches
 
 - `main`: stable release branch. Every commit on `main` should be releasable.
-- `develop`: integration branch for completed work before a release.
-- `feature/<short-name>`: focused feature or fix branches created from `develop`.
-- `release/vX.Y`: release hardening branch for a minor release.
+- `develop`: the only normal development branch. New work lands here directly through small, reviewed commits.
+- `release/vX`: release hardening branch for a major version line, for example `release/v0` or `release/v1`.
 - `hotfix/vX.Y.Z`: urgent production fix branch created from `main`.
 
 ## Tags
@@ -26,10 +25,9 @@ Tags should point to commits on `main`.
 ```bash
 git checkout develop
 git pull
-git checkout -b feature/deployment-drift-repair
 ```
 
-After the feature is complete:
+Make small commits directly on `develop`. Before pushing or opening a release:
 
 ```bash
 npm test
@@ -39,24 +37,17 @@ npm run build
 git diff --check
 ```
 
-Merge back through a pull request or a reviewed local merge:
-
-```bash
-git checkout develop
-git merge --no-ff feature/deployment-drift-repair
-```
-
 ## Release Flow
 
 ```bash
 git checkout develop
-git checkout -B release/v0.2
+git checkout -B release/v0
 npm test
 npm run lint
 npm run typecheck
 npm run build
 git checkout main
-git merge --no-ff release/v0.2
+git merge --no-ff release/v0
 git tag v0.2.0
 git checkout develop
 git merge --no-ff main
@@ -92,9 +83,10 @@ git merge --no-ff main
 ## Rules
 
 - Do not commit directly to `main` except release merges or emergency fixes.
-- Keep feature branches small and focused.
+- Do not create `feature/*` branches for normal work.
+- Keep development commits small and easy to review on `develop`.
+- Keep release branches aligned to version lines, not individual features.
 - Keep public docs and commit messages in English.
 - Do not commit ignored local docs, SQLite databases, environment files, build output, or node_modules.
 - Update `CHANGELOG.md` before tagging a release.
 - Run the validation suite before merging to `main`.
-

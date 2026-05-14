@@ -111,6 +111,9 @@ export type BackupSnapshot = {
     version: number;
     apps: ContainerApp[];
     deployments?: DeploymentBackupRecord[];
+    deploymentFiles?: BackupDeploymentFile[];
+    dockerProjectFiles?: BackupDockerProjectFile[];
+    dockerDataArchives?: BackupDockerDataArchive[];
     settings: ContainerSettings;
   };
 };
@@ -197,6 +200,35 @@ export type DeploymentBackupRecord = {
   resourceName: string;
   deployInput: unknown | null;
   createdAt: string;
+};
+
+export type BackupDeploymentFile = {
+  path: string;
+  encoding: 'base64';
+  content: string;
+  size: number;
+};
+
+export type BackupDockerDataArchive = {
+  deployment: string;
+  container: string;
+  origin?: 'the_containers' | 'registered_app' | 'compose' | 'docker';
+  type: 'bind' | 'volume';
+  name: string | null;
+  source: string;
+  destination: string;
+  files: BackupDeploymentFile[];
+  skipped: Array<{
+    path: string;
+    reason: string;
+    size?: number;
+  }>;
+};
+
+export type BackupDockerProjectFile = BackupDeploymentFile & {
+  absolutePath: string;
+  project: string | null;
+  container: string;
 };
 
 export type DeploymentLogs = {
@@ -460,12 +492,23 @@ export const api = {
     request<{
       exportedAt: string;
       version: number;
+      kind?: string;
       apps: ContainerApp[];
       deployments: DeploymentBackupRecord[];
+      deploymentFiles: BackupDeploymentFile[];
+      dockerProjectFiles: BackupDockerProjectFile[];
+      dockerDataArchives: BackupDockerDataArchive[];
+      notes?: string[];
       settings: ContainerSettings;
     }>('/api/backup'),
   restoreBackup: (payload: unknown) =>
-    request<AppListMutationResult & { settings: ContainerSettings; deployments: number }>(
+    request<AppListMutationResult & {
+      settings: ContainerSettings;
+      deployments: number;
+      deploymentFiles: number;
+      dockerProjectFiles: number;
+      dockerDataFiles: number;
+    }>(
       '/api/backup/restore',
       {
         method: 'POST',

@@ -6,7 +6,18 @@ This project follows [Semantic Versioning](https://semver.org/) while it is publ
 
 ## [Unreleased]
 
-- No unreleased changes.
+## [0.3.0] - 2026-05-14
+
+### Added
+
+- Backup bundle discovery for all local Docker containers by default, including Dockge-managed Compose stacks and manually started containers.
+- Backup and restore support for discovered Docker Compose project files.
+- Named Docker volume restore through Docker when host volume paths are not directly writable.
+- Linux autostart setup script that installs missing platform packages, repairs Docker permissions, detects rootless Docker sockets, configures Caddy, and creates a systemd service.
+
+### Changed
+
+- Version control documentation now uses `develop` for normal development and version-line release branches instead of `feature/*` branches.
 
 ## [0.2.0] - 2026-05-13
 
@@ -21,6 +32,7 @@ This project follows [Semantic Versioning](https://semver.org/) while it is publ
 - Deployment drift checks for missing containers, stopped containers, missing Compose files, port mismatches, and missing redeploy metadata.
 - Deployment drift repair actions for starting stopped deployments, redeploying missing managed resources, and updating app targets from runtime ports.
 - Backup and restore support for managed deployment records and redeploy metadata.
+- Backup bundle support for managed deployment files, readable Docker bind mount and named volume data, plus compatibility handling for older or differently shaped app export files.
 - Migration checklist for moving The Containers to a new host.
 
 ### Changed

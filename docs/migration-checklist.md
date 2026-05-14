@@ -10,11 +10,15 @@ The Admin backup export contains:
 - Settings.
 - Managed deployment records.
 - Saved redeploy metadata for deployments created by The Containers.
+- Managed deployment files, including Compose project files under `DEPLOYMENTS_PATH`.
+- Discovered Docker Compose project files from local containers, including Dockge-managed stacks when Docker labels expose the Compose file path.
+- Readable Docker bind mount and named volume data discovered from local Docker containers.
+- Docker data from The Containers managed deployments, registered apps with matching published ports, Compose stacks, Dockge stacks, and manually started containers.
 
 It does not contain:
 
-- Docker named volume data.
-- Bind-mounted app data directories.
+- Unreadable Docker Desktop VM volume paths.
+- Skipped large files beyond backup limits.
 - External databases.
 - Router port forwarding rules.
 - Public DNS records.
@@ -35,8 +39,8 @@ It does not contain:
    tar -czf /tmp/the-containers-deployments.tgz -C /opt/the-containers/data deployments
    ```
 
-4. Back up app data directories used by bind mounts.
-5. Back up Docker named volumes for important services.
+4. Review the Admin backup message and exported JSON notes for skipped Docker data files.
+5. Separately back up any skipped app data directories or Docker named volumes for important services.
 6. Record public DNS, local DNS, router forwarding, Cloudflare Tunnel, and reverse proxy settings.
 7. Record apps that use authentication callbacks, origin checks, or fixed public domains.
 
@@ -51,16 +55,16 @@ Treat these as data-critical services:
 - File sharing and pastebin services.
 - Any app using bind mounts or Docker named volumes.
 
-Before migration, identify each app's data path or Docker volume. The Containers can restore deployment metadata, but it cannot recreate missing application data.
+Before migration, identify each app's data path or Docker volume. The Containers can restore readable Docker data from the backup bundle, but skipped files and unreadable host paths still need a separate backup.
 
 ## Restore on the New Host
 
 1. Install Docker, Docker Compose, Caddy, Node.js, and The Containers.
 2. Restore `/opt/the-containers/data/the-containers.sqlite` if you are doing a full database restore.
 3. Restore deployment project files under `DEPLOYMENTS_PATH`.
-4. Restore Docker volumes and bind mount directories.
-5. Start The Containers.
-6. Import the Admin backup if you did not restore the full SQLite database.
+4. Start The Containers.
+5. Import the Admin backup to restore app records, settings, deployment records, Docker project files, readable bind mount data, and named volume data.
+6. Skip the import only if you restored the full SQLite database and separately restored Docker data.
 7. Run proxy sync from Admin.
 8. Open each managed app detail view and run deployment drift check.
 9. Use repair actions only after confirming the app data path exists on the new host.
@@ -94,4 +98,3 @@ Keep the old host powered off but unchanged until the new host is verified. If t
 2. Restore DNS or router forwarding to the old host.
 3. Start the old host services.
 4. Review The Containers audit logs to see what changed during migration.
-
