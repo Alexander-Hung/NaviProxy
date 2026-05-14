@@ -137,7 +137,7 @@ Deployment drift checks can detect:
 - App target ports that no longer match saved deployment metadata or runtime ports.
 - Docker run deployments that are missing redeploy metadata.
 
-Backup exports include apps, settings, managed deployment records, redeploy metadata, managed deployment files such as Compose project files, and readable Docker bind mount or named volume data. See [docs/migration-checklist.md](docs/migration-checklist.md) before moving The Containers to a new host.
+Backup exports include apps, settings, managed deployment records, redeploy metadata, managed deployment files, discovered Docker Compose project files, and readable Docker bind mount or named volume data. By default, the backup scans all local Docker containers so Dockge-managed stacks and manually started containers can be included in the same bundle. Set `BACKUP_DOCKER_SCOPE=managed` to only include deployments created by The Containers. See [docs/migration-checklist.md](docs/migration-checklist.md) before moving The Containers to a new host.
 
 ## Important Safety Model
 
@@ -162,7 +162,7 @@ It will not silently:
 - Change public DNS records.
 - Expose Caddy Admin API to the public internet.
 - Override protected host paths without user action.
-- Guarantee that every app data file exists on a new host after restore. Unreadable Docker Desktop VM volume paths, skipped large files, external databases, DNS records, and router rules may still require separate backup.
+- Guarantee that every app data file exists on a new host after restore. The backup restores readable Docker data and uses named Docker volumes when possible, but unreadable host paths, skipped large files, external databases, DNS records, and router rules may still require separate backup.
 
 Host permission checks are shown before deploy so users can see what is ready, what The Containers can handle, and what needs manual host authorization.
 

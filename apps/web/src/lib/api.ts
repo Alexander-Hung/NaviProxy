@@ -112,6 +112,7 @@ export type BackupSnapshot = {
     apps: ContainerApp[];
     deployments?: DeploymentBackupRecord[];
     deploymentFiles?: BackupDeploymentFile[];
+    dockerProjectFiles?: BackupDockerProjectFile[];
     dockerDataArchives?: BackupDockerDataArchive[];
     settings: ContainerSettings;
   };
@@ -211,6 +212,7 @@ export type BackupDeploymentFile = {
 export type BackupDockerDataArchive = {
   deployment: string;
   container: string;
+  origin?: 'the_containers' | 'registered_app' | 'compose' | 'docker';
   type: 'bind' | 'volume';
   name: string | null;
   source: string;
@@ -221,6 +223,12 @@ export type BackupDockerDataArchive = {
     reason: string;
     size?: number;
   }>;
+};
+
+export type BackupDockerProjectFile = BackupDeploymentFile & {
+  absolutePath: string;
+  project: string | null;
+  container: string;
 };
 
 export type DeploymentLogs = {
@@ -488,6 +496,7 @@ export const api = {
       apps: ContainerApp[];
       deployments: DeploymentBackupRecord[];
       deploymentFiles: BackupDeploymentFile[];
+      dockerProjectFiles: BackupDockerProjectFile[];
       dockerDataArchives: BackupDockerDataArchive[];
       notes?: string[];
       settings: ContainerSettings;
@@ -497,6 +506,7 @@ export const api = {
       settings: ContainerSettings;
       deployments: number;
       deploymentFiles: number;
+      dockerProjectFiles: number;
       dockerDataFiles: number;
     }>(
       '/api/backup/restore',

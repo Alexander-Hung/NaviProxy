@@ -6,7 +6,15 @@ This project follows [Semantic Versioning](https://semver.org/) while it is publ
 
 ## [Unreleased]
 
-- No unreleased changes.
+### Added
+
+- Backup bundle discovery for all local Docker containers by default, including Dockge-managed Compose stacks and manually started containers.
+- Backup and restore support for discovered Docker Compose project files.
+- Named Docker volume restore through Docker when host volume paths are not directly writable.
+
+### Changed
+
+- Version control documentation now uses `develop` for normal development and version-line release branches instead of `feature/*` branches.
 
 ## [0.2.0] - 2026-05-13
 

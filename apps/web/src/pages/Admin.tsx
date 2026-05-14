@@ -1554,7 +1554,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
         0
       );
       setMessage(
-        `Backup exported with ${data.apps.length} apps, ${data.deployments.length} deployments, ${data.deploymentFiles.length} deployment files, and ${dockerDataFiles} Docker data files.`
+        `Backup exported with ${data.apps.length} apps, ${data.deployments.length} deployments, ${data.deploymentFiles.length} deployment files, ${data.dockerProjectFiles.length} Docker project files, and ${dockerDataFiles} Docker data files.`
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -1578,7 +1578,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
       setApps(result.apps);
       setSettings(result.settings);
       setMessage(
-        `${proxySyncMessage(result.proxySync)} Restored ${result.deployments} managed deployment records, ${result.deploymentFiles} deployment files, and ${result.dockerDataFiles} Docker data files. A pre-restore snapshot was saved.`
+        `${proxySyncMessage(result.proxySync)} Restored ${result.deployments} managed deployment records, ${result.deploymentFiles} deployment files, ${result.dockerProjectFiles} Docker project files, and ${result.dockerDataFiles} Docker data files. A pre-restore snapshot was saved.`
       );
       await load();
     } catch (err) {

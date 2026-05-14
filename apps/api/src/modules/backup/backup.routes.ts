@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { ZodError } from 'zod';
@@ -19,6 +20,7 @@ type BackupFile = {
 type DockerMountArchive = {
   deployment: string;
   container: string;
+  origin: 'the_containers' | 'registered_app' | 'compose' | 'docker';
   type: 'bind' | 'volume';
   name: string | null;
   source: string;
@@ -31,6 +33,12 @@ type DockerMountArchive = {
   }>;
 };
 
+type DockerProjectFile = BackupFile & {
+  absolutePath: string;
+  project: string | null;
+  container: string;
+};
+
 type DockerMount = {
   Type?: string;
   Name?: string;
@@ -41,6 +49,13 @@ type DockerMount = {
 type DockerInspectContainer = {
   Id?: string;
   Name?: string;
+  Config?: {
+    Image?: string;
+    Labels?: Record<string, string>;
+  };
+  NetworkSettings?: {
+    Ports?: Record<string, Array<{ HostIp?: string; HostPort?: string }> | null>;
+  };
   Mounts?: DockerMount[];
 };
 
@@ -139,6 +154,97 @@ async function composeContainerNames(projectName: string) {
   return stdout.split('\n').map((line) => line.trim()).filter(Boolean);
 }
 
+async function allDockerContainerNames() {
+  const { stdout } = await runDocker([
+    'ps',
+    '-a',
+    '--format',
+    '{{.Names}}'
+  ]);
+
+  return stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+}
+
+function appTargetPorts(apps: Array<{ targetUrl?: string }>) {
+  const ports = new Set<number>();
+
+  for (const app of apps) {
+    if (!app.targetUrl) {
+      continue;
+    }
+
+    try {
+      const url = new URL(app.targetUrl);
+      const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
+
+      if (Number.isInteger(port) && port >= 1 && port <= 65535) {
+        ports.add(port);
+      }
+    } catch {
+      // Ignore legacy or partial target URLs in imported backups.
+    }
+  }
+
+  return ports;
+}
+
+function containerHostPorts(container: DockerInspectContainer) {
+  const ports = new Set<number>();
+
+  for (const bindings of Object.values(container.NetworkSettings?.Ports ?? {})) {
+    for (const binding of bindings ?? []) {
+      const port = Number(binding.HostPort);
+
+      if (Number.isInteger(port) && port >= 1 && port <= 65535) {
+        ports.add(port);
+      }
+    }
+  }
+
+  return ports;
+}
+
+function containerName(container: DockerInspectContainer) {
+  return container.Name?.replace(/^\//, '') || container.Id || 'unknown-container';
+}
+
+function containerComposeProject(container: DockerInspectContainer) {
+  return container.Config?.Labels?.['com.docker.compose.project'] ?? null;
+}
+
+function containerComposeConfigFiles(container: DockerInspectContainer) {
+  const raw = container.Config?.Labels?.['com.docker.compose.project.config_files'];
+
+  if (!raw) {
+    return [];
+  }
+
+  return raw
+    .split(',')
+    .map((file) => file.trim())
+    .filter((file) => path.isAbsolute(file));
+}
+
+function originForContainer(
+  container: DockerInspectContainer,
+  managedNames: Set<string>,
+  registeredPorts: Set<number>
+): DockerMountArchive['origin'] {
+  const name = containerName(container);
+
+  if (managedNames.has(name) || (containerComposeProject(container) && managedNames.has(containerComposeProject(container) ?? ''))) {
+    return 'the_containers';
+  }
+
+  for (const port of containerHostPorts(container)) {
+    if (registeredPorts.has(port)) {
+      return 'registered_app';
+    }
+  }
+
+  return containerComposeProject(container) ? 'compose' : 'docker';
+}
+
 async function collectFilesFromPath(
   root: string,
   options: {
@@ -213,73 +319,294 @@ async function collectFilesFromPath(
   return { files, skipped };
 }
 
-async function collectDockerDataArchives(deployments: Array<{ provider: string; resourceName: string }>) {
-  const archives: DockerMountArchive[] = [];
-  let totalSize = 0;
-  const seenMounts = new Set<string>();
+async function discoverBackupContainers(
+  deployments: Array<{ provider: string; resourceName: string }>,
+  apps: Array<{ targetUrl?: string }>
+) {
+  const backupScope = (process.env.BACKUP_DOCKER_SCOPE ?? 'all').toLowerCase();
+  const managedNames = new Set(deployments.map((deployment) => deployment.resourceName));
+  const registeredPorts = appTargetPorts(apps);
+  const containersByName = new Map<string, DockerInspectContainer>();
 
   for (const deployment of deployments) {
-    let containers: DockerInspectContainer[] = [];
-
     try {
       if (deployment.provider === 'docker_compose') {
         const names = await composeContainerNames(deployment.resourceName);
-        containers = (await Promise.all(names.map((name) => inspectDockerContainer(name))))
-          .filter((container): container is DockerInspectContainer => Boolean(container));
+
+        for (const name of names) {
+          const container = await inspectDockerContainer(name);
+
+          if (container) {
+            containersByName.set(containerName(container), container);
+          }
+        }
       } else {
         const container = await inspectDockerContainer(deployment.resourceName);
-        containers = container ? [container] : [];
+
+        if (container) {
+          containersByName.set(containerName(container), container);
+        }
       }
     } catch {
       continue;
     }
+  }
 
-    for (const container of containers) {
-      const containerName = container.Name?.replace(/^\//, '') || container.Id || deployment.resourceName;
+  if (backupScope !== 'managed') {
+    try {
+      const names = await allDockerContainerNames();
 
-      for (const mount of container.Mounts ?? []) {
-        if (
-          mount.Type !== 'bind' &&
-          mount.Type !== 'volume'
-        ) {
+      for (const name of names) {
+        if (containersByName.has(name)) {
           continue;
         }
 
-        if (!mount.Source || !mount.Destination) {
+        const container = await inspectDockerContainer(name);
+
+        if (container) {
+          containersByName.set(containerName(container), container);
+        }
+      }
+    } catch {
+      // Docker may be unavailable on development machines. The app backup still remains useful.
+    }
+  }
+
+  return [...containersByName.values()].map((container) => ({
+    container,
+    origin: originForContainer(container, managedNames, registeredPorts)
+  }));
+}
+
+async function collectDockerProjectFiles(
+  containers: Array<{ container: DockerInspectContainer; origin: DockerMountArchive['origin'] }>
+) {
+  const files: DockerProjectFile[] = [];
+  const seen = new Set<string>();
+
+  for (const { container } of containers) {
+    for (const filePath of containerComposeConfigFiles(container)) {
+      const resolved = path.resolve(filePath);
+
+      if (seen.has(resolved)) {
+        continue;
+      }
+
+      seen.add(resolved);
+
+      try {
+        const stat = await fs.stat(resolved);
+
+        if (!stat.isFile() || stat.size > maxBackupFileSize) {
           continue;
         }
 
-        const mountKey = `${mount.Type}:${mount.Source}`;
+        const content = await fs.readFile(resolved);
 
-        if (seenMounts.has(mountKey)) {
-          continue;
-        }
-
-        seenMounts.add(mountKey);
-
-        const { files, skipped } = await collectFilesFromPath(mount.Source, {
-          maxFileSize: maxDockerDataFileSize,
-          remainingBytes: () => Math.max(0, maxDockerDataTotalSize - totalSize),
-          consumeBytes: (bytes) => {
-            totalSize += bytes;
-          }
+        files.push({
+          path: path.basename(resolved),
+          absolutePath: resolved,
+          project: containerComposeProject(container),
+          container: containerName(container),
+          encoding: 'base64',
+          content: content.toString('base64'),
+          size: stat.size
         });
-
-        archives.push({
-          deployment: deployment.resourceName,
-          container: containerName,
-          type: mount.Type,
-          name: mount.Name ?? null,
-          source: mount.Source,
-          destination: mount.Destination,
-          files,
-          skipped
-        });
+      } catch {
+        continue;
       }
     }
   }
 
+  return files;
+}
+
+async function collectDockerDataArchives(
+  containers: Array<{ container: DockerInspectContainer; origin: DockerMountArchive['origin'] }>
+) {
+  const archives: DockerMountArchive[] = [];
+  let totalSize = 0;
+  const seenMounts = new Set<string>();
+
+  for (const { container, origin } of containers) {
+    const name = containerName(container);
+    const deployment = containerComposeProject(container) ?? name;
+
+    for (const mount of container.Mounts ?? []) {
+      if (
+        mount.Type !== 'bind' &&
+        mount.Type !== 'volume'
+      ) {
+        continue;
+      }
+
+      if (!mount.Source || !mount.Destination) {
+        continue;
+      }
+
+      const mountKey = `${mount.Type}:${mount.Name ?? mount.Source}`;
+
+      if (seenMounts.has(mountKey)) {
+        continue;
+      }
+
+      seenMounts.add(mountKey);
+
+      const { files, skipped } = await collectFilesFromPath(mount.Source, {
+        maxFileSize: maxDockerDataFileSize,
+        remainingBytes: () => Math.max(0, maxDockerDataTotalSize - totalSize),
+        consumeBytes: (bytes) => {
+          totalSize += bytes;
+        }
+      });
+
+      archives.push({
+        deployment,
+        container: name,
+        origin,
+        type: mount.Type,
+        name: mount.Name ?? null,
+        source: mount.Source,
+        destination: mount.Destination,
+        files,
+        skipped
+      });
+    }
+  }
+
   return archives;
+}
+
+async function restoreDockerProjectFiles(files: unknown) {
+  if (!Array.isArray(files)) {
+    return 0;
+  }
+
+  let restored = 0;
+
+  for (const file of files) {
+    if (!file || typeof file !== 'object') {
+      continue;
+    }
+
+    const input = file as Partial<DockerProjectFile>;
+
+    if (
+      typeof input.absolutePath !== 'string' ||
+      !path.isAbsolute(input.absolutePath) ||
+      input.encoding !== 'base64' ||
+      typeof input.content !== 'string'
+    ) {
+      continue;
+    }
+
+    await fs.mkdir(path.dirname(input.absolutePath), { recursive: true });
+    await fs.writeFile(input.absolutePath, Buffer.from(input.content, 'base64'), { mode: 0o600 });
+    restored += 1;
+  }
+
+  return restored;
+}
+
+async function writeBackupFilesToRoot(root: string, files: BackupFile[]) {
+  let restored = 0;
+  const resolvedRoot = path.resolve(root);
+
+  for (const file of files) {
+    if (!safeRelativePath(file.path)) {
+      continue;
+    }
+
+    const target = path.resolve(resolvedRoot, file.path);
+
+    if (!target.startsWith(`${resolvedRoot}${path.sep}`)) {
+      continue;
+    }
+
+    await fs.mkdir(path.dirname(target), { recursive: true });
+    await fs.writeFile(target, Buffer.from(file.content, 'base64'), { mode: 0o600 });
+    restored += 1;
+  }
+
+  return restored;
+}
+
+async function restoreNamedVolume(name: string, files: BackupFile[]) {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'the-containers-volume-restore-'));
+  const helperName = `the-containers-restore-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+  try {
+    await writeBackupFilesToRoot(tmpRoot, files);
+    await runDocker(['volume', 'create', name]);
+
+    try {
+      await runDocker(['create', '--name', helperName, '-v', `${name}:/restore`, 'busybox:latest', 'sh']);
+    } catch {
+      await runDocker(['pull', 'busybox:latest']);
+      await runDocker(['create', '--name', helperName, '-v', `${name}:/restore`, 'busybox:latest', 'sh']);
+    }
+
+    await runDocker(['cp', `${tmpRoot}${path.sep}.`, `${helperName}:/restore`]);
+    return files.length;
+  } finally {
+    await runDocker(['rm', '-f', helperName]).catch(() => undefined);
+    await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+function backupFilesFromUnknown(files: unknown) {
+  if (!Array.isArray(files)) {
+    return [];
+  }
+
+  return files.flatMap((file) => {
+    if (!file || typeof file !== 'object') {
+      return [];
+    }
+
+    const input = file as Partial<BackupFile>;
+
+    if (
+      typeof input.path !== 'string' ||
+      input.encoding !== 'base64' ||
+      typeof input.content !== 'string' ||
+      typeof input.size !== 'number' ||
+      !safeRelativePath(input.path)
+    ) {
+      return [];
+    }
+
+    return [{
+      path: input.path,
+      encoding: input.encoding,
+      content: input.content,
+      size: input.size
+    }];
+  });
+}
+
+async function restoreMountArchive(input: Partial<DockerMountArchive>) {
+  const files = backupFilesFromUnknown(input.files);
+
+  if (files.length === 0) {
+    return 0;
+  }
+
+  if (input.type === 'volume' && typeof input.name === 'string' && input.name) {
+    try {
+      return await restoreNamedVolume(input.name, files);
+    } catch {
+      if (typeof input.source !== 'string' || !path.isAbsolute(input.source)) {
+        return 0;
+      }
+    }
+  }
+
+  if (typeof input.source !== 'string' || !path.isAbsolute(input.source)) {
+    return 0;
+  }
+
+  return restoreFilesToRoot(input.source, files);
 }
 
 async function restoreDeploymentFiles(files: unknown) {
@@ -371,15 +698,7 @@ async function restoreDockerDataArchives(archives: unknown) {
 
     const input = archive as Partial<DockerMountArchive>;
 
-    if (
-      typeof input.source !== 'string' ||
-      !path.isAbsolute(input.source) ||
-      !Array.isArray(input.files)
-    ) {
-      continue;
-    }
-
-    restored += await restoreFilesToRoot(input.source, input.files);
+    restored += await restoreMountArchive(input);
   }
 
   return restored;
@@ -416,6 +735,13 @@ function extractBackupBody(input: unknown) {
       data.docker_data_archives ??
       payload.dockerDataArchives ??
       payload.docker_data_archives,
+    dockerProjectFiles:
+      record.dockerProjectFiles ??
+      record.docker_project_files ??
+      data.dockerProjectFiles ??
+      data.docker_project_files ??
+      payload.dockerProjectFiles ??
+      payload.docker_project_files,
     settings: record.settings ?? data.settings ?? payload.settings
   };
 }
@@ -429,19 +755,24 @@ export async function registerBackupRoutes(
   app.get('/api/backup', async () => {
     const deploymentFiles = await collectDeploymentFiles();
     const deployments = appsService.exportDeployments();
-    const dockerDataArchives = await collectDockerDataArchives(deployments);
+    const apps = appsService.exportApps().apps;
+    const dockerContainers = await discoverBackupContainers(deployments, apps);
+    const dockerProjectFiles = await collectDockerProjectFiles(dockerContainers);
+    const dockerDataArchives = await collectDockerDataArchives(dockerContainers);
 
     return {
       exportedAt: new Date().toISOString(),
-      version: 4,
+      version: 5,
       kind: 'the-containers-backup',
-      apps: appsService.exportApps().apps,
+      apps,
       deployments,
       deploymentFiles,
+      dockerProjectFiles,
       dockerDataArchives,
       notes: [
-        'This backup includes The Containers configuration, managed deployment files, and readable Docker bind mount or named volume data.',
-        'External databases, DNS records, router rules, unreadable Docker Desktop VM volume paths, skipped large files, and files outside Docker mounts may still need separate backup.'
+        'This backup includes The Containers configuration, managed deployment files, discovered Docker Compose project files, and readable Docker bind mount or named volume data.',
+        'By default BACKUP_DOCKER_SCOPE=all scans all local Docker containers, including Dockge-managed stacks and manually started containers. Set BACKUP_DOCKER_SCOPE=managed to only include The Containers managed deployments.',
+        'External databases, DNS records, router rules, unreadable host paths, skipped large files, and files outside Docker mounts may still need separate backup.'
       ],
       settings: settingsService.getAll()
     };
@@ -452,6 +783,7 @@ export async function registerBackupRoutes(
       apps?: unknown[];
       deployments?: unknown[];
       deploymentFiles?: unknown[];
+      dockerProjectFiles?: unknown[];
       dockerDataArchives?: unknown[];
       settings?: unknown;
     };
@@ -469,17 +801,19 @@ export async function registerBackupRoutes(
         adminTokenConfigured: Boolean(config.adminToken)
       });
       const deploymentFiles = await restoreDeploymentFiles(body.deploymentFiles);
+      const dockerProjectFiles = await restoreDockerProjectFiles(body.dockerProjectFiles);
       const dockerDataFiles = await restoreDockerDataArchives(body.dockerDataArchives);
       auditService.record({
         action: 'backup.restore',
         targetType: 'backup',
-        summary: `Restored ${body.apps.length} apps, ${deploymentFiles} deployment files, and ${dockerDataFiles} Docker data files`,
+        summary: `Restored ${body.apps.length} apps, ${deploymentFiles} deployment files, ${dockerProjectFiles} Docker project files, and ${dockerDataFiles} Docker data files`,
         sourceIp: request.ip
       });
 
       return {
         ...result,
         deploymentFiles,
+        dockerProjectFiles,
         dockerDataFiles
       };
     } catch (error) {
