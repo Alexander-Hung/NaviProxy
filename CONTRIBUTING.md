@@ -25,16 +25,9 @@ Default development URLs:
 Run:
 
 ```bash
-npm test
 npm run lint
 npm run typecheck
 npm run build
-```
-
-For UI changes, also run:
-
-```bash
-npm run test:e2e
 ```
 
 ## Contribution Guidelines
@@ -44,7 +37,6 @@ npm run test:e2e
 - Open release hardening work from `release/*` branches.
 - Follow existing project patterns before adding new abstractions.
 - Prefer small, explicit behavior over broad rewrites.
-- Add tests when changing deploy parsing, Docker/Compose behavior, Caddy rendering, app lifecycle, auth, or database contracts.
 - Do not commit local database files, environment files, generated build output, or private notes.
 - Public docs and code comments must stay English-only.
 

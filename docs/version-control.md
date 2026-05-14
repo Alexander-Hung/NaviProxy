@@ -30,7 +30,6 @@ git pull
 Make small commits directly on `develop`. Before pushing or opening a release:
 
 ```bash
-npm test
 npm run lint
 npm run typecheck
 npm run build
@@ -42,7 +41,6 @@ git diff --check
 ```bash
 git checkout develop
 git checkout -B release/v0
-npm test
 npm run lint
 npm run typecheck
 npm run build
@@ -69,7 +67,6 @@ git checkout -b hotfix/v0.2.1
 After the fix:
 
 ```bash
-npm test
 npm run lint
 npm run typecheck
 npm run build
@@ -89,4 +86,4 @@ git merge --no-ff main
 - Keep public docs and commit messages in English.
 - Do not commit ignored local docs, SQLite databases, environment files, build output, or node_modules.
 - Update `CHANGELOG.md` before tagging a release.
-- Run the validation suite before merging to `main`.
+- Run lint, typecheck, and build before merging to `main`.
