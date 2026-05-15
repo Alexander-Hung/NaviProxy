@@ -2630,7 +2630,7 @@ async function waitForPort(port: number, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    if (!(await checkPortAvailable(port))) {
+    if (await canConnectToLocalPort(port)) {
       return true;
     }
 
@@ -2638,6 +2638,36 @@ async function waitForPort(port: number, timeoutMs = 10_000) {
   }
 
   return false;
+}
+
+function canConnectToLocalPort(port: number) {
+  return new Promise<boolean>((resolve) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+
+    const finish = (result: boolean) => {
+      socket.removeAllListeners();
+      socket.destroy();
+      resolve(result);
+    };
+
+    socket.setTimeout(500);
+    socket.once('connect', () => finish(true));
+    socket.once('timeout', () => finish(false));
+    socket.once('error', () => finish(false));
+  });
+}
+
+async function ensureBinaryServicePortListening(plan: DockerRunPlan, timeoutMs = 15_000) {
+  const port = plan.hostPort ?? plan.containerPort;
+
+  if (await waitForPort(port, timeoutMs)) {
+    return;
+  }
+
+  throw new DeployExecutionError(
+    `Binary/service started, but nothing is listening on ${targetUrlForPort(port)}. ` +
+      'Set the service command or service configuration to use this exact web port, or change the Binary/service port to the port it actually listens on.'
+  );
 }
 
 async function startBinaryServiceProcess(plan: DockerRunPlan) {
@@ -2653,7 +2683,7 @@ async function startBinaryServiceProcess(plan: DockerRunPlan) {
     timeout: 15_000,
     maxBuffer: 1024 * 1024
   });
-  await waitForPort(plan.hostPort ?? plan.containerPort).catch(() => false);
+  await ensureBinaryServicePortListening(plan);
   return (await findBinaryServicePids(plan.containerName)).join(',') || command;
 }
 
@@ -2677,7 +2707,7 @@ async function installAndStartBinaryService(plan: DockerRunPlan) {
     await fs.writeFile(plan.serviceFilePath, systemdServiceContent(plan), 'utf8');
     await runSystemctlUser(['daemon-reload'], { timeout: 15_000 });
     await runSystemctlUser(['enable', '--now', `${plan.serviceName}.service`], { timeout: 30_000 });
-    await waitForPort(plan.hostPort ?? plan.containerPort).catch(() => false);
+    await ensureBinaryServicePortListening(plan);
     return plan.serviceFilePath;
   }
 
@@ -2694,7 +2724,7 @@ async function installAndStartBinaryService(plan: DockerRunPlan) {
       timeout: 30_000,
       maxBuffer: 1024 * 1024
     });
-    await waitForPort(plan.hostPort ?? plan.containerPort).catch(() => false);
+    await ensureBinaryServicePortListening(plan);
     return plan.serviceFilePath;
   }
 
@@ -2772,6 +2802,9 @@ async function controlBinaryService(
 
   if (serviceKind === 'systemd_user') {
     await runSystemctlUser([action, `${serviceName}.service`], { timeout: 30_000 });
+    if (plan && action !== 'stop') {
+      await ensureBinaryServicePortListening(plan);
+    }
     return;
   }
 
@@ -2784,6 +2817,9 @@ async function controlBinaryService(
         timeout: 30_000,
         maxBuffer: 1024 * 1024
       });
+      if (plan) {
+        await ensureBinaryServicePortListening(plan);
+      }
       return;
     }
 
@@ -2799,6 +2835,9 @@ async function controlBinaryService(
         timeout: 30_000,
         maxBuffer: 1024 * 1024
       });
+      if (plan) {
+        await ensureBinaryServicePortListening(plan);
+      }
     }
     return;
   }
@@ -2974,7 +3013,7 @@ async function buildBinaryServicePlanFromInput(
           ? `The Containers will install and start a launchd agent at ${serviceFilePath}.`
           : 'This platform does not expose systemd user services or launchd, so The Containers will fall back to direct process management.',
       'The service command should stay in the foreground so the service manager can track and restart it.',
-      `The Web UI is expected on ${targetUrl}. If this service uses a different web port, set the host port before deploying.`,
+      `The service must actually listen on ${targetUrl}. Binary/service does not rewrite the service's own port configuration.`,
       ...(parsed.publishMode === 'public_domain_reverse_proxy'
         ? [
             'Public domain mode requires DNS to point to this machine and Caddy to receive public traffic.'
@@ -3419,6 +3458,9 @@ export class DeployService {
       const detail = commandDetail(error);
 
       if (plan.method !== 'docker_run' || !isContainerNameConflict(detail)) {
+        if (plan.method === 'binary_service') {
+          await removeBinaryService(plan.containerName, plan.resolvedDeployInput).catch(() => undefined);
+        }
         throw error;
       }
 
