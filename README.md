@@ -130,6 +130,8 @@ The deploy flow is:
 
 Binary/service deployments require the local web port where the service listens. The Containers does not auto-remap Binary/service ports because the user-provided command controls the listener. On Linux, Binary/service deployments are installed as user systemd services. On macOS, they are installed as launchd agents.
 
+Linux Binary/service deployments require a working user systemd bus for the user running The Containers. If The Containers itself runs from a system service, enable linger for that user and make sure `user@UID.service` is running. The deploy doctor shows the exact `loginctl`, `systemctl`, `XDG_RUNTIME_DIR`, and `DBUS_SESSION_BUS_ADDRESS` commands for the current user.
+
 When a managed app is deleted, The Containers attempts to remove the related Docker container, Compose project, or local service and free the route.
 
 ## Managed Deployment Operations
