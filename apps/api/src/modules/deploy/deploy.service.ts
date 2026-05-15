@@ -1449,7 +1449,7 @@ async function commandPermissionRequirements(input: unknown) {
         status: systemctlService ? 'needs_user' : serviceKind === 'process' ? 'needs_user' : 'auto',
         userHelpRequired: Boolean(systemctlService) || serviceKind === 'process',
         detail: systemctlService
-          ? `This uses an existing system service. Make sure ${systemctlService.usesSudo ? 'sudo systemctl' : 'systemctl'} ${systemctlService.action} ${serviceName} can run without an interactive password prompt.`
+          ? `This uses an existing system service. Make sure ${systemctlService.usesSudo ? 'sudo -n systemctl' : 'systemctl'} ${systemctlService.action} ${serviceName} can run without an interactive password prompt, or keep the service already running on port ${webPort}.`
           : serviceKind === 'systemd_user'
           ? `The Containers will install and enable user systemd service ${serviceName}.service using ${systemdUserContext().busAddress}.`
           : serviceKind === 'launchd_user'
@@ -1458,7 +1458,7 @@ async function commandPermissionRequirements(input: unknown) {
         commands: systemctlService
           ? [
               `${systemctlService.usesSudo ? 'sudo ' : ''}systemctl status ${serviceName}`,
-              `${systemctlService.usesSudo ? 'sudo ' : ''}systemctl ${systemctlService.action} ${serviceName}`
+              `${systemctlService.usesSudo ? 'sudo -n ' : ''}systemctl ${systemctlService.action} ${serviceName}`
             ]
           : serviceKind === 'systemd_user'
           ? [
@@ -2582,7 +2582,7 @@ async function runSystemctlSystem(
   options: { timeout?: number; sudo?: boolean } = {}
 ) {
   const command = options.sudo ? 'sudo' : 'systemctl';
-  const commandArgs = options.sudo ? ['systemctl', ...args] : args;
+  const commandArgs = options.sudo ? ['-n', 'systemctl', ...args] : args;
 
   return execFileAsync(command, commandArgs, {
     timeout: options.timeout ?? 30_000,
@@ -2596,6 +2596,20 @@ async function systemctlSystemOutput(
 ) {
   const { stdout } = await runSystemctlSystem(args, options);
   return stdout.trim();
+}
+
+function isSudoAuthenticationError(error: unknown) {
+  return /sudo:.*(terminal is required|password is required|a password is required|no tty present)|a terminal is required to authenticate/i.test(commandDetail(error));
+}
+
+function systemctlSudoUnavailableError(error: unknown, serviceName: string, action: string) {
+  const username = os.userInfo().username || 'the-containers';
+
+  return new DeployRuntimeUnavailableError(
+    `${commandDetail(error)} The Containers cannot answer sudo password prompts because the API runs without an interactive terminal. ` +
+      `Either keep ${serviceName} already running on its service port, remove sudo if this process can run systemctl directly, or grant passwordless sudo for this service, for example: ` +
+      `${username} ALL=(root) NOPASSWD: /bin/systemctl ${action} ${serviceName}, /bin/systemctl start ${serviceName}, /bin/systemctl stop ${serviceName}, /bin/systemctl status ${serviceName}`
+  );
 }
 
 function binaryProcessName(resourceName: string, deployInput?: unknown) {
@@ -2768,10 +2782,21 @@ async function stopBinaryServiceProcess(resourceName = 'binary-service') {
 
 async function installAndStartBinaryService(plan: DockerRunPlan) {
   if (plan.serviceKind === 'systemd_system' && plan.serviceName) {
-    await runSystemctlSystem([plan.systemctlAction ?? 'restart', plan.serviceName], {
-      sudo: plan.systemctlUsesSudo,
-      timeout: 60_000
-    });
+    const action = plan.systemctlAction ?? 'restart';
+    try {
+      await runSystemctlSystem([action, plan.serviceName], {
+        sudo: plan.systemctlUsesSudo,
+        timeout: 60_000
+      });
+    } catch (error) {
+      if (plan.systemctlUsesSudo && isSudoAuthenticationError(error)) {
+        if (await waitForPort(plan.hostPort ?? plan.containerPort, 1_500)) {
+          return `systemd:${plan.serviceName}`;
+        }
+        throw systemctlSudoUnavailableError(error, plan.serviceName, action);
+      }
+      throw error;
+    }
     await ensureBinaryServicePortListening(plan, 60_000);
     return `systemd:${plan.serviceName}`;
   }
@@ -2900,10 +2925,17 @@ async function controlBinaryService(
     if (!plan?.serviceName) {
       throw new DeployInputError('This system service is missing service metadata.');
     }
-    await runSystemctlSystem([action, plan.serviceName], {
-      sudo: plan.systemctlUsesSudo,
-      timeout: 60_000
-    });
+    try {
+      await runSystemctlSystem([action, plan.serviceName], {
+        sudo: plan.systemctlUsesSudo,
+        timeout: 60_000
+      });
+    } catch (error) {
+      if (plan.systemctlUsesSudo && isSudoAuthenticationError(error)) {
+        throw systemctlSudoUnavailableError(error, plan.serviceName, action);
+      }
+      throw error;
+    }
     if (action !== 'stop') {
       await ensureBinaryServicePortListening(plan, 60_000);
     }
@@ -3148,7 +3180,7 @@ async function buildBinaryServicePlanFromInput(
           ? `The Containers will install and start a launchd agent at ${serviceFilePath}.`
           : 'This platform does not expose systemd user services or launchd, so The Containers will fall back to direct process management.',
       serviceKind === 'systemd_system'
-        ? 'Deleting this managed deployment only removes The Containers route metadata; it does not uninstall or disable the existing system service.'
+        ? 'If sudo cannot run without a password prompt, deployment can still adopt the service when the configured port is already listening. Deleting this managed deployment only removes The Containers route metadata; it does not uninstall or disable the existing system service.'
         : 'The service command should stay in the foreground so the service manager can track and restart it.',
       `The service must actually listen on ${targetUrl}. Binary/service does not rewrite the service's own port configuration.`,
       ...(parsed.publishMode === 'public_domain_reverse_proxy'
