@@ -81,7 +81,9 @@ type DockerRunPlan = {
   serviceArgs?: string[];
   serviceName?: string;
   serviceFilePath?: string;
-  serviceKind?: 'systemd_user' | 'launchd_user' | 'process';
+  serviceKind?: 'systemd_user' | 'systemd_system' | 'launchd_user' | 'process';
+  systemctlAction?: 'start' | 'restart';
+  systemctlUsesSudo?: boolean;
   warnings: string[];
   resolvedDeployInput: ParsedDeployInput & Record<string, unknown>;
 };
@@ -1408,6 +1410,7 @@ async function commandPermissionRequirements(input: unknown) {
 
     if (parsedInput.method === 'binary_service') {
       const parsedCommand = parseBinaryServiceCommand(command);
+      const systemctlService = parseSystemctlServiceCommand(command);
       const webPort = parsedInput.hostPort ?? parsedInput.containerPort ?? null;
 
       if (!webPort) {
@@ -1424,29 +1427,40 @@ async function commandPermissionRequirements(input: unknown) {
 
       const serviceKind = binaryServiceKind();
       const executableName = path.basename(parsedCommand.executable).replace(/\.[^.]+$/, '');
-      const baseName = parsedInput.name ?? executableName;
-      const serviceName = binaryServiceName(slugify(baseName) || slugify(executableName) || 'binary-service');
+      const baseName = parsedInput.name ?? (systemctlService?.serviceName.replace(/\.service$/i, '') || executableName);
+      const serviceName = systemctlService?.serviceName ?? binaryServiceName(slugify(baseName) || slugify(executableName) || 'binary-service');
 
-      requirements.push(await binaryServicePortRequirement(webPort));
+      if (!systemctlService) {
+        requirements.push(await binaryServicePortRequirement(webPort));
+      }
       requirements.push({
         id: 'binary-service-command',
         label: 'Service command',
         status: 'auto',
         userHelpRequired: false,
-        detail: `The Containers will install ${parsedCommand.executable} ${parsedCommand.args.join(' ')} as a binary service and route to port ${webPort}.`,
+        detail: systemctlService
+          ? `The Containers will run ${systemctlService.usesSudo ? 'sudo ' : ''}systemctl ${systemctlService.action} ${systemctlService.serviceName} and route to port ${webPort}.`
+          : `The Containers will install ${parsedCommand.executable} ${parsedCommand.args.join(' ')} as a binary service and route to port ${webPort}.`,
         commands: []
       });
       requirements.push({
         id: 'service-manager',
         label: 'Service manager',
-        status: serviceKind === 'process' ? 'needs_user' : 'auto',
-        userHelpRequired: serviceKind === 'process',
-        detail: serviceKind === 'systemd_user'
+        status: systemctlService ? 'needs_user' : serviceKind === 'process' ? 'needs_user' : 'auto',
+        userHelpRequired: Boolean(systemctlService) || serviceKind === 'process',
+        detail: systemctlService
+          ? `This uses an existing system service. Make sure ${systemctlService.usesSudo ? 'sudo systemctl' : 'systemctl'} ${systemctlService.action} ${serviceName} can run without an interactive password prompt.`
+          : serviceKind === 'systemd_user'
           ? `The Containers will install and enable user systemd service ${serviceName}.service using ${systemdUserContext().busAddress}.`
           : serviceKind === 'launchd_user'
             ? `The Containers will install and bootstrap launchd agent ${serviceName}.`
             : 'This platform is not supported for service installation; The Containers can only start the process directly.',
-        commands: serviceKind === 'systemd_user'
+        commands: systemctlService
+          ? [
+              `${systemctlService.usesSudo ? 'sudo ' : ''}systemctl status ${serviceName}`,
+              `${systemctlService.usesSudo ? 'sudo ' : ''}systemctl ${systemctlService.action} ${serviceName}`
+            ]
+          : serviceKind === 'systemd_user'
           ? [
               ...systemdUserGrantCommands(),
               `XDG_RUNTIME_DIR=${systemdUserContext().runtimeDir} DBUS_SESSION_BUS_ADDRESS=${systemdUserContext().busAddress} systemctl --user status ${serviceName}.service`
@@ -2448,6 +2462,36 @@ function parseBinaryServiceCommand(command: string) {
   };
 }
 
+function parseSystemctlServiceCommand(command: string) {
+  const tokens = tokenizeShellCommand(command);
+  const sudoIndex = tokens[0] === 'sudo' ? 1 : 0;
+  const executable = tokens[sudoIndex];
+
+  if (!executable || path.basename(executable) !== 'systemctl') {
+    return null;
+  }
+
+  const args = tokens.slice(sudoIndex + 1);
+
+  if (args.includes('--user')) {
+    return null;
+  }
+
+  const actionIndex = args.findIndex((arg) => ['start', 'restart'].includes(arg));
+  const action = args[actionIndex] as 'start' | 'restart' | undefined;
+  const serviceName = action ? args[actionIndex + 1] : undefined;
+
+  if (!action || !serviceName || serviceName.startsWith('-')) {
+    return null;
+  }
+
+  return {
+    action,
+    serviceName,
+    usesSudo: sudoIndex === 1
+  };
+}
+
 function binaryServiceName(resourceName = 'binary-service') {
   return `the-containers-${slugify(resourceName) || 'binary-service'}`;
 }
@@ -2530,6 +2574,27 @@ async function runSystemctlUser(args: string[], options: { timeout?: number } = 
 
 async function systemctlUserOutput(args: string[], options: { timeout?: number } = {}) {
   const { stdout } = await runSystemctlUser(args, options);
+  return stdout.trim();
+}
+
+async function runSystemctlSystem(
+  args: string[],
+  options: { timeout?: number; sudo?: boolean } = {}
+) {
+  const command = options.sudo ? 'sudo' : 'systemctl';
+  const commandArgs = options.sudo ? ['systemctl', ...args] : args;
+
+  return execFileAsync(command, commandArgs, {
+    timeout: options.timeout ?? 30_000,
+    maxBuffer: 1024 * 1024
+  });
+}
+
+async function systemctlSystemOutput(
+  args: string[],
+  options: { timeout?: number; sudo?: boolean } = {}
+) {
+  const { stdout } = await runSystemctlSystem(args, options);
   return stdout.trim();
 }
 
@@ -2702,6 +2767,15 @@ async function stopBinaryServiceProcess(resourceName = 'binary-service') {
 }
 
 async function installAndStartBinaryService(plan: DockerRunPlan) {
+  if (plan.serviceKind === 'systemd_system' && plan.serviceName) {
+    await runSystemctlSystem([plan.systemctlAction ?? 'restart', plan.serviceName], {
+      sudo: plan.systemctlUsesSudo,
+      timeout: 60_000
+    });
+    await ensureBinaryServicePortListening(plan, 60_000);
+    return `systemd:${plan.serviceName}`;
+  }
+
   if (plan.serviceKind === 'systemd_user' && plan.serviceName && plan.serviceFilePath) {
     await fs.mkdir(path.dirname(plan.serviceFilePath), { recursive: true });
     await fs.writeFile(plan.serviceFilePath, systemdServiceContent(plan), 'utf8');
@@ -2740,6 +2814,28 @@ async function binaryServiceStatus(resourceName: string, deployInput?: unknown) 
     deployInput && typeof deployInput === 'object' && 'serviceKind' in deployInput
       ? (deployInput as { serviceKind?: DockerRunPlan['serviceKind'] }).serviceKind
       : binaryServiceKind();
+  if (serviceKind === 'systemd_system') {
+    try {
+      const active = await systemctlSystemOutput(['is-active', serviceName]);
+      const enabled = await systemctlSystemOutput(['is-enabled', serviceName]).catch(() => 'disabled');
+
+      return {
+        running: active === 'active',
+        state: `${active}${enabled ? `, ${enabled}` : ''}`,
+        serviceName,
+        serviceKind,
+        pids: await findBinaryServicePids(binaryProcessName(resourceName, deployInput))
+      };
+    } catch {
+      return {
+        running: false,
+        state: 'inactive',
+        serviceName,
+        serviceKind,
+        pids: await findBinaryServicePids(binaryProcessName(resourceName, deployInput))
+      };
+    }
+  }
 
   if (serviceKind === 'systemd_user') {
     try {
@@ -2799,6 +2895,20 @@ async function controlBinaryService(
   const plan = deployInput ? await buildBinaryServicePlanFromInput(deployInput) : null;
   const serviceName = plan?.serviceName ?? binaryServiceName(resourceName);
   const serviceKind = plan?.serviceKind ?? binaryServiceKind();
+
+  if (serviceKind === 'systemd_system') {
+    if (!plan?.serviceName) {
+      throw new DeployInputError('This system service is missing service metadata.');
+    }
+    await runSystemctlSystem([action, plan.serviceName], {
+      sudo: plan.systemctlUsesSudo,
+      timeout: 60_000
+    });
+    if (action !== 'stop') {
+      await ensureBinaryServicePortListening(plan, 60_000);
+    }
+    return;
+  }
 
   if (serviceKind === 'systemd_user') {
     await runSystemctlUser([action, `${serviceName}.service`], { timeout: 30_000 });
@@ -2861,6 +2971,10 @@ async function removeBinaryService(resourceName: string, deployInput?: unknown) 
   const serviceFilePath = plan?.serviceFilePath ??
     (serviceKind === 'systemd_user' ? systemdUserServicePath(serviceName) : launchdPlistPath(serviceName));
 
+  if (serviceKind === 'systemd_system') {
+    return;
+  }
+
   if (serviceKind === 'systemd_user') {
     await runSystemctlUser(['disable', '--now', `${serviceName}.service`], { timeout: 30_000 })
       .catch(() => undefined);
@@ -2886,6 +3000,20 @@ async function binaryServiceLogs(resourceName: string, deployInput?: unknown, ta
   const plan = deployInput ? await buildBinaryServicePlanFromInput(deployInput) : null;
   const serviceName = plan?.serviceName ?? binaryServiceName(resourceName);
   const serviceKind = plan?.serviceKind ?? binaryServiceKind();
+
+  if (serviceKind === 'systemd_system') {
+    const result = await execFileAsync('journalctl', [
+      '-u',
+      serviceName,
+      '-n',
+      String(tail),
+      '--no-pager'
+    ], {
+      timeout: 15_000,
+      maxBuffer: 1024 * 1024
+    });
+    return [result.stdout, result.stderr].filter(Boolean).join('\n').trimEnd();
+  }
 
   if (serviceKind === 'systemd_user') {
     const result = await execFileAsync('journalctl', [
@@ -2927,6 +3055,7 @@ async function buildBinaryServicePlanFromInput(
 
   const command = parsed.command;
   const binary = parseBinaryServiceCommand(command);
+  const systemctlService = parseSystemctlServiceCommand(command);
   const executablePath = await resolveCommandPath(binary.executable);
   const webPort = parsed.hostPort ?? parsed.containerPort ?? null;
 
@@ -2934,7 +3063,7 @@ async function buildBinaryServicePlanFromInput(
     throw new DeployInputError('Enter the local port where this service exposes its web UI before deploying.');
   }
 
-  if (checkPort) {
+  if (checkPort && !systemctlService) {
     const portCheck = await binaryServicePortRequirement(webPort);
 
     if (portCheck.status === 'blocked') {
@@ -2943,10 +3072,10 @@ async function buildBinaryServicePlanFromInput(
   }
 
   const executableName = path.basename(binary.executable).replace(/\.[^.]+$/, '');
-  const baseName = parsed.name ?? executableName;
+  const baseName = parsed.name ?? (systemctlService?.serviceName.replace(/\.service$/i, '') || executableName);
   const containerName = slugify(baseName) || slugify(executableName) || 'binary-service';
-  const serviceName = binaryServiceName(containerName);
-  const serviceKind = binaryServiceKind();
+  const serviceName = systemctlService?.serviceName ?? binaryServiceName(containerName);
+  const serviceKind = systemctlService ? 'systemd_system' as const : binaryServiceKind();
   const serviceFilePath =
     serviceKind === 'systemd_user'
       ? systemdUserServicePath(serviceName)
@@ -2992,6 +3121,8 @@ async function buildBinaryServicePlanFromInput(
     serviceName,
     serviceFilePath,
     serviceKind,
+    systemctlAction: systemctlService?.action,
+    systemctlUsesSudo: systemctlService?.usesSudo,
     resolvedDeployInput: {
       ...resolvedDeployInput(parsed, {
         method: 'binary_service',
@@ -3004,15 +3135,21 @@ async function buildBinaryServicePlanFromInput(
       serviceFilePath,
       processCommand: executablePath,
       processArgs: binary.args,
-      serviceArgs: binary.serviceArgs
+      serviceArgs: binary.serviceArgs,
+      systemctlAction: systemctlService?.action,
+      systemctlUsesSudo: systemctlService?.usesSudo
     },
     warnings: [
-      serviceKind === 'systemd_user'
+      serviceKind === 'systemd_system'
+        ? `The Containers will run ${systemctlService?.usesSudo ? 'sudo ' : ''}systemctl ${systemctlService?.action ?? 'restart'} ${serviceName} and manage the public route for the existing system service.`
+        : serviceKind === 'systemd_user'
         ? `The Containers will install and start a user systemd service at ${serviceFilePath}.`
         : serviceKind === 'launchd_user'
           ? `The Containers will install and start a launchd agent at ${serviceFilePath}.`
           : 'This platform does not expose systemd user services or launchd, so The Containers will fall back to direct process management.',
-      'The service command should stay in the foreground so the service manager can track and restart it.',
+      serviceKind === 'systemd_system'
+        ? 'Deleting this managed deployment only removes The Containers route metadata; it does not uninstall or disable the existing system service.'
+        : 'The service command should stay in the foreground so the service manager can track and restart it.',
       `The service must actually listen on ${targetUrl}. Binary/service does not rewrite the service's own port configuration.`,
       ...(parsed.publishMode === 'public_domain_reverse_proxy'
         ? [
