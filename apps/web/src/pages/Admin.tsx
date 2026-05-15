@@ -1146,6 +1146,16 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     setDeployDoctor(null);
   }
 
+  function updateBinaryServicePort(port: number | null) {
+    setDeployForm((current) => ({
+      ...current,
+      hostPort: port,
+      containerPort: port
+    }));
+    setDeployPlan(null);
+    setDeployDoctor(null);
+  }
+
   function updateDeployCommand(command: string) {
     const isCompose = looksLikeComposeYaml(command);
     const parsed = isCompose
@@ -1182,6 +1192,11 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   }
 
   function deployPayload() {
+    const binaryServicePort =
+      deployForm.method === 'binary_service'
+        ? deployForm.hostPort || deployForm.containerPort || null
+        : null;
+
     return {
       ...deployForm,
       name: deployForm.name?.trim() || undefined,
@@ -1189,8 +1204,8 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
         deployForm.routeMode === 'subpath'
           ? deployForm.publicPath || '/app'
           : null,
-      hostPort: deployForm.hostPort || null,
-      containerPort: deployForm.containerPort || null,
+      hostPort: deployForm.method === 'binary_service' ? binaryServicePort : deployForm.hostPort || null,
+      containerPort: deployForm.method === 'binary_service' ? binaryServicePort : deployForm.containerPort || null,
       tags: deployForm.tags.filter(Boolean)
     };
   }
@@ -2576,6 +2591,11 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                   }
                   disabled={selectedDeployMethod.status !== 'available'}
                 />
+                {deployForm.method === 'binary_service' ? (
+                  <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
+                    The command or service config must listen on the Service web port. The Containers verifies that port after start.
+                  </p>
+                ) : null}
               </div>
 
               <DeployHostPermissionSection
@@ -2721,7 +2741,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                 ) : null}
                 <div>
                   <label className="label" htmlFor="deployHostPort">
-                    Host port
+                    {deployForm.method === 'binary_service' ? 'Service web port' : 'Host port'}
                   </label>
                   <input
                     id="deployHostPort"
@@ -2729,36 +2749,49 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                     type="number"
                     min={1}
                     max={65535}
-                    value={deployForm.hostPort ?? ''}
-                    onChange={(event) =>
-                      updateDeploy(
-                        'hostPort',
-                        event.target.value ? Number(event.target.value) : null
-                      )
+                    value={
+                      deployForm.method === 'binary_service'
+                        ? deployForm.hostPort ?? deployForm.containerPort ?? ''
+                        : deployForm.hostPort ?? ''
                     }
-                    placeholder="Auto"
+                    onChange={(event) => {
+                      const port = event.target.value ? Number(event.target.value) : null;
+                      if (deployForm.method === 'binary_service') {
+                        updateBinaryServicePort(port);
+                        return;
+                      }
+                      updateDeploy('hostPort', port);
+                    }}
+                    placeholder={deployForm.method === 'binary_service' ? '8080' : 'Auto'}
                   />
+                  {deployForm.method === 'binary_service' ? (
+                    <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
+                      Must match the port the service really opens. For example, if the daemon still listens on 8080, enter 8080 or change that daemon's own config first.
+                    </p>
+                  ) : null}
                 </div>
-                <div>
-                  <label className="label" htmlFor="deployContainerPort">
-                    Container port
-                  </label>
-                  <input
-                    id="deployContainerPort"
-                    className="field"
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={deployForm.containerPort ?? ''}
-                    onChange={(event) =>
-                      updateDeploy(
-                        'containerPort',
-                        event.target.value ? Number(event.target.value) : null
-                      )
-                    }
-                    placeholder="From -p"
-                  />
-                </div>
+                {deployForm.method === 'binary_service' ? null : (
+                  <div>
+                    <label className="label" htmlFor="deployContainerPort">
+                      Container port
+                    </label>
+                    <input
+                      id="deployContainerPort"
+                      className="field"
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={deployForm.containerPort ?? ''}
+                      onChange={(event) =>
+                        updateDeploy(
+                          'containerPort',
+                          event.target.value ? Number(event.target.value) : null
+                        )
+                      }
+                      placeholder="From -p"
+                    />
+                  </div>
+                )}
               </div>
 
               <div>
