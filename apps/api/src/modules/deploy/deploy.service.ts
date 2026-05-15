@@ -1442,12 +1442,15 @@ async function commandPermissionRequirements(input: unknown) {
         status: serviceKind === 'process' ? 'needs_user' : 'auto',
         userHelpRequired: serviceKind === 'process',
         detail: serviceKind === 'systemd_user'
-          ? `The Containers will install and enable user systemd service ${serviceName}.service.`
+          ? `The Containers will install and enable user systemd service ${serviceName}.service using ${systemdUserContext().busAddress}.`
           : serviceKind === 'launchd_user'
             ? `The Containers will install and bootstrap launchd agent ${serviceName}.`
             : 'This platform is not supported for service installation; The Containers can only start the process directly.',
         commands: serviceKind === 'systemd_user'
-          ? ['systemctl --user status', `systemctl --user status ${serviceName}.service`]
+          ? [
+              ...systemdUserGrantCommands(),
+              `XDG_RUNTIME_DIR=${systemdUserContext().runtimeDir} DBUS_SESSION_BUS_ADDRESS=${systemdUserContext().busAddress} systemctl --user status ${serviceName}.service`
+            ]
           : serviceKind === 'launchd_user'
             ? ['launchctl print gui/$(id -u)']
             : []
@@ -2469,6 +2472,67 @@ function binaryServiceKind(): DockerRunPlan['serviceKind'] {
   return 'process';
 }
 
+function systemdUserContext() {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : os.userInfo().uid;
+  const username = os.userInfo().username || String(uid);
+  const runtimeDir = process.env.XDG_RUNTIME_DIR || `/run/user/${uid}`;
+  const busAddress = process.env.DBUS_SESSION_BUS_ADDRESS || `unix:path=${path.join(runtimeDir, 'bus')}`;
+
+  return {
+    uid,
+    username,
+    runtimeDir,
+    busAddress,
+    env: {
+      ...process.env,
+      XDG_RUNTIME_DIR: runtimeDir,
+      DBUS_SESSION_BUS_ADDRESS: busAddress
+    }
+  };
+}
+
+function systemdUserGrantCommands() {
+  const context = systemdUserContext();
+
+  return [
+    `sudo loginctl enable-linger ${context.username}`,
+    `sudo systemctl start user@${context.uid}.service`,
+    `XDG_RUNTIME_DIR=${context.runtimeDir} DBUS_SESSION_BUS_ADDRESS=${context.busAddress} systemctl --user status`
+  ];
+}
+
+function isSystemdUserBusError(detail: string) {
+  return /DBUS_SESSION_BUS_ADDRESS|XDG_RUNTIME_DIR|Failed to connect to user scope bus|No medium found|No such file or directory/i.test(detail);
+}
+
+function systemdUserUnavailableError(error: unknown) {
+  const detail = commandDetail(error);
+  const context = systemdUserContext();
+
+  return new DeployRuntimeUnavailableError(
+    isSystemdUserBusError(detail)
+      ? `${detail} User systemd is not available for ${context.username}. Enable linger and start user@${context.uid}.service, then retry.`
+      : detail
+  );
+}
+
+async function runSystemctlUser(args: string[], options: { timeout?: number } = {}) {
+  try {
+    return await execFileAsync('systemctl', ['--user', ...args], {
+      env: systemdUserContext().env,
+      timeout: options.timeout ?? 30_000,
+      maxBuffer: 1024 * 1024
+    });
+  } catch (error) {
+    throw systemdUserUnavailableError(error);
+  }
+}
+
+async function systemctlUserOutput(args: string[], options: { timeout?: number } = {}) {
+  const { stdout } = await runSystemctlUser(args, options);
+  return stdout.trim();
+}
+
 function binaryProcessName(resourceName: string, deployInput?: unknown) {
   if (deployInput && typeof deployInput === 'object' && 'processCommand' in deployInput) {
     const processCommand = (deployInput as { processCommand?: unknown }).processCommand;
@@ -2611,14 +2675,8 @@ async function installAndStartBinaryService(plan: DockerRunPlan) {
   if (plan.serviceKind === 'systemd_user' && plan.serviceName && plan.serviceFilePath) {
     await fs.mkdir(path.dirname(plan.serviceFilePath), { recursive: true });
     await fs.writeFile(plan.serviceFilePath, systemdServiceContent(plan), 'utf8');
-    await execFileAsync('systemctl', ['--user', 'daemon-reload'], {
-      timeout: 15_000,
-      maxBuffer: 1024 * 1024
-    });
-    await execFileAsync('systemctl', ['--user', 'enable', '--now', `${plan.serviceName}.service`], {
-      timeout: 30_000,
-      maxBuffer: 1024 * 1024
-    });
+    await runSystemctlUser(['daemon-reload'], { timeout: 15_000 });
+    await runSystemctlUser(['enable', '--now', `${plan.serviceName}.service`], { timeout: 30_000 });
     await waitForPort(plan.hostPort ?? plan.containerPort).catch(() => false);
     return plan.serviceFilePath;
   }
@@ -2655,8 +2713,8 @@ async function binaryServiceStatus(resourceName: string, deployInput?: unknown) 
 
   if (serviceKind === 'systemd_user') {
     try {
-      const active = await commandOutput('systemctl', ['--user', 'is-active', `${serviceName}.service`]);
-      const enabled = await commandOutput('systemctl', ['--user', 'is-enabled', `${serviceName}.service`]).catch(() => 'disabled');
+      const active = await systemctlUserOutput(['is-active', `${serviceName}.service`]);
+      const enabled = await systemctlUserOutput(['is-enabled', `${serviceName}.service`]).catch(() => 'disabled');
 
       return {
         running: active === 'active',
@@ -2713,10 +2771,7 @@ async function controlBinaryService(
   const serviceKind = plan?.serviceKind ?? binaryServiceKind();
 
   if (serviceKind === 'systemd_user') {
-    await execFileAsync('systemctl', ['--user', action, `${serviceName}.service`], {
-      timeout: 30_000,
-      maxBuffer: 1024 * 1024
-    });
+    await runSystemctlUser([action, `${serviceName}.service`], { timeout: 30_000 });
     return;
   }
 
@@ -2768,15 +2823,10 @@ async function removeBinaryService(resourceName: string, deployInput?: unknown) 
     (serviceKind === 'systemd_user' ? systemdUserServicePath(serviceName) : launchdPlistPath(serviceName));
 
   if (serviceKind === 'systemd_user') {
-    await execFileAsync('systemctl', ['--user', 'disable', '--now', `${serviceName}.service`], {
-      timeout: 30_000,
-      maxBuffer: 1024 * 1024
-    }).catch(() => undefined);
+    await runSystemctlUser(['disable', '--now', `${serviceName}.service`], { timeout: 30_000 })
+      .catch(() => undefined);
     await fs.rm(serviceFilePath, { force: true }).catch(() => undefined);
-    await execFileAsync('systemctl', ['--user', 'daemon-reload'], {
-      timeout: 15_000,
-      maxBuffer: 1024 * 1024
-    }).catch(() => undefined);
+    await runSystemctlUser(['daemon-reload'], { timeout: 15_000 }).catch(() => undefined);
     return;
   }
 
@@ -2807,6 +2857,7 @@ async function binaryServiceLogs(resourceName: string, deployInput?: unknown, ta
       String(tail),
       '--no-pager'
     ], {
+      env: systemdUserContext().env,
       timeout: 15_000,
       maxBuffer: 1024 * 1024
     });
@@ -3130,11 +3181,13 @@ export class DeployService {
       if (serviceKind === 'systemd_user') {
         try {
           const version = await commandOutput('systemctl', ['--version']);
+          await runSystemctlUser(['show-environment'], { timeout: 15_000 });
+          const context = systemdUserContext();
           checks.push({
             id: 'service-manager',
             label: 'User systemd',
             status: 'pass',
-            detail: version.split('\n')[0] ?? 'systemctl is available'
+            detail: `${version.split('\n')[0] ?? 'systemctl is available'}; user bus ${context.busAddress}`
           });
         } catch (error) {
           checks.push({
@@ -3146,10 +3199,7 @@ export class DeployService {
           grantSteps.push({
             title: 'Enable user systemd',
             description: 'Binary/service deployments install a user service so the process survives restarts.',
-            commands: [
-              'systemctl --user status',
-              'loginctl enable-linger "$USER"'
-            ]
+            commands: systemdUserGrantCommands()
           });
         }
       } else if (serviceKind === 'launchd_user') {

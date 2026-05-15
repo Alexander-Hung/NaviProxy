@@ -6,6 +6,12 @@ This project follows [Semantic Versioning](https://semver.org/) while it is publ
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-14
+
+### Fixed
+
+- Binary/service systemd user commands now set `XDG_RUNTIME_DIR` and `DBUS_SESSION_BUS_ADDRESS` explicitly and report missing user-bus setup during doctor checks.
+
 ## [0.4.0] - 2026-05-14
 
 ### Added
