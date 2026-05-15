@@ -17,7 +17,7 @@ import {
   Upload,
   X
 } from 'lucide-react';
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AuditLogPanel, BackupSnapshotsPanel } from '../components/AdminPanels';
 import { AppCard } from '../components/AppCard';
 import { RouteModeWarning } from '../components/RouteModeWarning';
@@ -816,6 +816,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
   const [deployForm, setDeployForm] = useState<DeployPayload>(initialDeployForm);
   const [deployPlan, setDeployPlan] = useState<DeployPlan | null>(null);
   const [deployDoctor, setDeployDoctor] = useState<DeployDoctor | null>(null);
+  const deployDoctorAutoChecked = useRef(false);
   const [deploySuccess, setDeploySuccess] = useState<DeployResult | null>(null);
   const [showDeployDialog, setShowDeployDialog] = useState(false);
   const [detailAppId, setDetailAppId] = useState<string | null>(null);
@@ -896,20 +897,34 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
       setError(null);
       setMessage(null);
       setShowDeployDialog(true);
+      deployDoctorAutoChecked.current = false;
     }
   }, [openDeploySignal]);
 
   useEffect(() => {
-    if (!showDeployDialog || deployDoctor || checkingDeployPermission) {
+    if (!showDeployDialog) {
+      deployDoctorAutoChecked.current = false;
+    }
+  }, [showDeployDialog]);
+
+  useEffect(() => {
+    if (
+      !showDeployDialog ||
+      deployDoctorAutoChecked.current ||
+      deployDoctor ||
+      checkingDeployPermission
+    ) {
       return;
     }
 
+    deployDoctorAutoChecked.current = true;
     void checkDeployPermission(false);
   }, [checkingDeployPermission, deployDoctor, showDeployDialog]);
 
   useEffect(() => {
     if (
       !showDeployDialog ||
+      deployForm.method === 'binary_service' ||
       !deployForm.command.trim() ||
       deployForm.hostPort
     ) {
@@ -1152,6 +1167,29 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
       hostPort: port,
       containerPort: port
     }));
+    setDeployPlan(null);
+    setDeployDoctor(null);
+  }
+
+  function selectDeployMethod(method: DeployPayload['method']) {
+    setDeployForm((current) => {
+      if (method === 'binary_service') {
+        return {
+          ...current,
+          method,
+          command: current.method === 'binary_service' ? current.command : '',
+          name: current.method === 'binary_service' ? current.name : '',
+          hostPort: current.method === 'binary_service' ? current.hostPort : null,
+          containerPort: current.method === 'binary_service' ? current.containerPort : null,
+          category: current.category || 'Self-hosted'
+        };
+      }
+
+      return {
+        ...current,
+        method
+      };
+    });
     setDeployPlan(null);
     setDeployDoctor(null);
   }
@@ -2526,18 +2564,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                           : 'border-black/10 bg-white/70 text-black/60 hover:text-black dark:border-white/15 dark:bg-white/[0.04] dark:text-[#b8c7c1] dark:hover:text-white'
                       }`}
                       onClick={() => {
-                        updateDeploy('method', method.id);
-                        if (method.id === 'binary_service') {
-                          setDeployForm((current) => ({
-                            ...current,
-                            method: 'binary_service',
-                            command: current.method === 'binary_service' ? current.command : '',
-                            name: current.method === 'binary_service' ? current.name : '',
-                            hostPort: current.method === 'binary_service' ? current.hostPort : null,
-                            containerPort: current.method === 'binary_service' ? current.containerPort : null,
-                            category: current.category || 'Self-hosted'
-                          }));
-                        }
+                        selectDeployMethod(method.id);
                       }}
                     >
                       <span className="flex items-center justify-between gap-2">
