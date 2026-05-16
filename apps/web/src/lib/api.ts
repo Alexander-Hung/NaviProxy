@@ -90,6 +90,7 @@ export type ContainerSettings = {
   tlsMode: 'http' | 'auto_https' | 'internal_ca';
   dashboardAuthRequired: boolean;
   healthCheckIntervalSeconds: number;
+  customCaddyRoutes: Record<string, unknown>[];
 };
 
 export type AuditLog = {

@@ -19,11 +19,13 @@ export class ProxyService {
 
   async sync() {
     const apps = this.appsRepo.findEnabled();
+    const settings = this.settingsService.getAll();
     const caddyConfig = buildCaddyConfig(
       apps,
       config.caddyListen,
       config.dashboardTargetUrl,
-      this.settingsService.getAll().tlsMode
+      settings.tlsMode,
+      settings.customCaddyRoutes as Record<string, unknown>[]
     );
     const hash = crypto
       .createHash('sha256')
@@ -61,11 +63,13 @@ export class ProxyService {
   }
 
   getRenderedConfig() {
+    const settings = this.settingsService.getAll();
     return buildCaddyConfig(
       this.appsRepo.findEnabled(),
       config.caddyListen,
       config.dashboardTargetUrl,
-      this.settingsService.getAll().tlsMode
+      settings.tlsMode,
+      settings.customCaddyRoutes as Record<string, unknown>[]
     );
   }
 

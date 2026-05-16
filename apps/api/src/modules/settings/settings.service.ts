@@ -6,16 +6,41 @@ export type ContainerSettings = {
   tlsMode: TlsMode;
   dashboardAuthRequired: boolean;
   healthCheckIntervalSeconds: number;
+  customCaddyRoutes: unknown[];
 };
 
 const defaults: ContainerSettings = {
   tlsMode: 'http',
   dashboardAuthRequired: false,
-  healthCheckIntervalSeconds: 0
+  healthCheckIntervalSeconds: 0,
+  customCaddyRoutes: []
 };
 
 function isTlsMode(value: unknown): value is TlsMode {
   return value === 'http' || value === 'auto_https' || value === 'internal_ca';
+}
+
+function normalizeCustomCaddyRoutes(value: unknown): unknown[] {
+  if (value === undefined) {
+    return defaults.customCaddyRoutes;
+  }
+
+  const parsed =
+    typeof value === 'string' && value.trim()
+      ? JSON.parse(value) as unknown
+      : value;
+
+  if (!Array.isArray(parsed)) {
+    throw new Error('Custom Caddy routes must be a JSON array.');
+  }
+
+  for (const route of parsed) {
+    if (!route || typeof route !== 'object' || Array.isArray(route)) {
+      throw new Error('Each custom Caddy route must be a JSON object.');
+    }
+  }
+
+  return parsed;
 }
 
 export class SettingsService {
@@ -31,6 +56,7 @@ export class SettingsService {
     const healthCheckIntervalSeconds = Number(
       values.get('healthCheckIntervalSeconds') ?? defaults.healthCheckIntervalSeconds
     );
+    const customCaddyRoutes = values.get('customCaddyRoutes');
 
     return {
       tlsMode: isTlsMode(tlsMode) ? tlsMode : defaults.tlsMode,
@@ -40,7 +66,8 @@ export class SettingsService {
           : dashboardAuthRequired === 'true',
       healthCheckIntervalSeconds: Number.isFinite(healthCheckIntervalSeconds)
         ? Math.min(Math.max(Math.round(healthCheckIntervalSeconds), 0), 86400)
-        : defaults.healthCheckIntervalSeconds
+        : defaults.healthCheckIntervalSeconds,
+      customCaddyRoutes: normalizeCustomCaddyRoutes(customCaddyRoutes)
     };
   }
 
@@ -69,7 +96,11 @@ export class SettingsService {
               ),
               86400
             )
-          : current.healthCheckIntervalSeconds
+          : current.healthCheckIntervalSeconds,
+      customCaddyRoutes:
+        'customCaddyRoutes' in patch
+          ? normalizeCustomCaddyRoutes((patch as { customCaddyRoutes?: unknown }).customCaddyRoutes)
+          : current.customCaddyRoutes
     };
 
     if (next.dashboardAuthRequired && !options.adminTokenConfigured) {
@@ -94,6 +125,7 @@ export class SettingsService {
       'healthCheckIntervalSeconds',
       String(next.healthCheckIntervalSeconds)
     );
+    upsert.run('customCaddyRoutes', JSON.stringify(next.customCaddyRoutes));
 
     return next;
   }
