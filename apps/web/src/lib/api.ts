@@ -492,7 +492,7 @@ export const api = {
     ),
   settings: () => request<ContainerSettings>('/api/settings'),
   updateSettings: (payload: Partial<ContainerSettings>) =>
-    request<ContainerSettings>('/api/settings', {
+    request<{ settings: ContainerSettings; proxySync: ProxySync }>('/api/settings', {
       method: 'PUT',
       body: JSON.stringify(payload)
     }),
