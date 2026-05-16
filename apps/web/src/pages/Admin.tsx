@@ -1781,12 +1781,13 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
 
   async function saveSettings(patch: Partial<ContainerSettings>) {
     try {
-      const next = await api.updateSettings(patch);
+      const result = await api.updateSettings(patch);
+      const next = result.settings;
       setSettings(next);
       setCustomCaddyRoutesText(JSON.stringify(next.customCaddyRoutes ?? [], null, 2));
       setProxyDiagnostics(await api.proxyDiagnostics().catch(() => null));
       setAuditLogs(await api.auditLogs().catch(() => []));
-      setMessage('Settings saved.');
+      setMessage(proxySyncMessage(result.proxySync));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }

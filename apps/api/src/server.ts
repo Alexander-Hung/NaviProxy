@@ -123,7 +123,7 @@ await registerAppsRoutes(app, appsService, auditService, deployService);
 await registerProxyRoutes(app, proxyService, auditService);
 await registerDiagnosticsRoutes(app);
 await registerDeployRoutes(app, deployService, auditService);
-await registerSettingsRoutes(app, settingsService, auditService);
+await registerSettingsRoutes(app, settingsService, proxyService, auditService);
 await registerBackupRoutes(app, appsService, settingsService, auditService);
 await registerAuditRoutes(app, auditService);
 startHealthScheduler(appsService, settingsService, auditService);
