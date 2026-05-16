@@ -77,13 +77,17 @@ export function buildCaddyConfig(
   apps: AppRecord[],
   listen: string,
   dashboardTargetUrl: string,
-  tlsMode: TlsMode = 'http'
+  tlsMode: TlsMode = 'http',
+  customRoutes: CaddyRoute[] = []
 ) {
-  const routes = apps.map((app) =>
-    app.routeMode === 'subdomain'
-      ? buildSubdomainRoute(app)
-      : buildSubpathRoute(app)
-  );
+  const routes = [
+    ...customRoutes,
+    ...apps.map((app) =>
+      app.routeMode === 'subdomain'
+        ? buildSubdomainRoute(app)
+        : buildSubpathRoute(app)
+    )
+  ];
 
   routes.push(buildDashboardRoute(dashboardTargetUrl));
 

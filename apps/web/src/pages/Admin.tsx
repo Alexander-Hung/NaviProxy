@@ -810,6 +810,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     }
   });
   const [settings, setSettings] = useState<ContainerSettings | null>(null);
+  const [customCaddyRoutesText, setCustomCaddyRoutesText] = useState('[]');
   const [proxyDiagnostics, setProxyDiagnostics] = useState<ProxyDiagnostics | null>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
   const [backupSnapshots, setBackupSnapshots] = useState<BackupSnapshot[]>([]);
@@ -867,6 +868,7 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
 
     setAuthRequired(Boolean(health?.authRequired));
     setSettings(nextSettings);
+    setCustomCaddyRoutesText(JSON.stringify(nextSettings?.customCaddyRoutes ?? [], null, 2));
     setProxyDiagnostics(nextProxyDiagnostics);
     setAuditLogs(nextAuditLogs);
     setBackupSnapshots(nextBackupSnapshots);
@@ -1781,9 +1783,26 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
     try {
       const next = await api.updateSettings(patch);
       setSettings(next);
+      setCustomCaddyRoutesText(JSON.stringify(next.customCaddyRoutes ?? [], null, 2));
       setProxyDiagnostics(await api.proxyDiagnostics().catch(() => null));
       setAuditLogs(await api.auditLogs().catch(() => []));
       setMessage('Settings saved.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  async function saveCustomCaddyRoutes() {
+    try {
+      const parsed = JSON.parse(customCaddyRoutesText) as unknown;
+
+      if (!Array.isArray(parsed)) {
+        throw new Error('Custom Caddy routes must be a JSON array.');
+      }
+
+      await saveSettings({
+        customCaddyRoutes: parsed as Record<string, unknown>[]
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -3350,6 +3369,32 @@ export function Admin({ onBack, openDeploySignal = 0 }: Props) {
                 />
                 Require token for dashboard list
               </label>
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label className="label" htmlFor="customCaddyRoutes">
+                    Custom Caddy routes JSON
+                  </label>
+                  <button
+                    className="inline-flex h-8 items-center gap-2 rounded bg-ink px-3 text-xs font-semibold text-white transition hover:bg-spruce dark:bg-[#dff3ec] dark:text-[#0f1714]"
+                    type="button"
+                    onClick={() => void saveCustomCaddyRoutes()}
+                    title="Save custom Caddy routes"
+                  >
+                    <Save size={14} />
+                    Save
+                  </button>
+                </div>
+                <textarea
+                  id="customCaddyRoutes"
+                  className="field min-h-40 resize-y font-mono text-xs leading-relaxed"
+                  value={customCaddyRoutesText}
+                  onChange={(event) => setCustomCaddyRoutesText(event.target.value)}
+                  spellCheck={false}
+                />
+                <p className="mt-1 text-xs text-black/50 dark:text-[#a9bbb4]">
+                  JSON array of Caddy HTTP routes merged before generated app routes. Private hosts stay in local settings and backups.
+                </p>
+              </div>
               {proxyDiagnostics ? (
                 <div className="rounded border border-black/10 p-3 text-xs text-black/60 dark:border-white/15 dark:text-[#b8c7c1]">
                   <div className="flex items-center justify-between gap-3">
