@@ -192,12 +192,13 @@ function expandDeployShortOptionGroup(token: string) {
 }
 
 function tokenizeDeployCommand(command: string) {
+  const normalizedCommand = command.replace(/\\[ \t]*\r?\n/g, ' ');
   const tokens: string[] = [];
   let current = '';
   let quote: '"' | "'" | null = null;
   let escaped = false;
 
-  for (const char of command) {
+  for (const char of normalizedCommand) {
     if (escaped) {
       current += char;
       escaped = false;
